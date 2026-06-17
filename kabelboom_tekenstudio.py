@@ -3,6 +3,14 @@
 
 from __future__ import annotations
 
+import sys as _sys
+
+# Velopack roept de exe tijdens (de)installatie en updates aan met
+# --veloapp-install/-obsolete/-updated/-uninstall. De app moet die hooks
+# herkennen en meteen, zonder venster, afsluiten (binnen 15-30s).
+if any(arg.startswith("--veloapp-") for arg in _sys.argv[1:]):
+    raise SystemExit(0)
+
 import base64
 import csv
 import io

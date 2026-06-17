@@ -100,3 +100,36 @@ python -m unittest discover -s tests
 ```
 
 JSON-projecten worden atomisch opgeslagen via een tijdelijk bestand; bij overschrijven blijft de vorige versie als `.bak` naast het project staan. Persoonlijke voorkeuren (UI-schaal, laatst gebruikte mappen) staan in `settings.json` naast de scripts en horen niet bij een kabelboomproject zelf.
+
+## Distributie (Velopack)
+
+De app wordt verpakt met [Velopack](https://velopack.io). Vereisten: een
+geinstalleerde [.NET SDK](https://dotnet.microsoft.com) plus de `vpk`-tool
+(`dotnet tool install -g vpk`).
+
+Bouwen en een release maken:
+
+```powershell
+./tools/build_release.ps1 -Version 1.0.0
+```
+
+Dit doet drie dingen:
+
+1. **PyInstaller one-dir build** -> `dist/Kabelboom Tekenstudio/`. Het app-icoon
+   (`assets/icon.ico`) wordt in de exe ingebed, zodat het op de taakbalk en bij
+   de snelkoppelingen verschijnt.
+2. **`vpk pack`** -> `Releases/`, met een installer (`*-Setup.exe`) die de
+   splash-afbeelding (`assets/splash.png`) toont tijdens downloaden/installeren
+   en automatisch een desktop- + startmenu-snelkoppeling aanmaakt.
+3. Optioneel **publiceren** naar GitHub Releases met `-Publish`:
+
+```powershell
+$env:GITHUB_TOKEN = "ghp_..."        # token met repo-rechten
+./tools/build_release.ps1 -Version 1.0.1 -Publish
+```
+
+De iconen/splash worden gegenereerd met `python tools/make_assets.py`; pas dat
+script aan om het ontwerp te wijzigen.
+
+De app vangt de Velopack lifecycle-hooks (`--veloapp-*`) af en sluit dan stil
+af, zodat er tijdens (de)installatie en updates geen venster verschijnt.

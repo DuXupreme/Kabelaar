@@ -12,6 +12,9 @@ __pycache__/
 /dist/
 /release/
 
+# Velopack release-output
+/Releases/
+
 # Persoonlijke gebruikersinstellingen (wordt op runtime aangemaakt)
 settings.json
 
