@@ -467,6 +467,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.wire_tangent_drag_state: Optional[dict] = None
         self.wire_curve_drag_state: Optional[dict] = None
         self.table_resize_state: Optional[dict] = None
+        self.connector_label_drag_state: Optional[dict] = None
         self.panning = False
         self.pan_start: Optional[Tuple[float, float]] = None
         self.cursor_world: Tuple[float, float] = (0.0, 0.0)
@@ -571,6 +572,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._apply_panel_layout(persist=False)
         self._apply_control_ui_scale()
         self._refresh_block_list()
+        self._merge_library_symbols_into_session()
         self.load_selection_properties_to_panel()
         self._bind_events()
         self._reset_history()
@@ -708,6 +710,57 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         path = self._blocks_library_path()
         path.parent.mkdir(parents=True, exist_ok=True)
         write_text_atomic(path, json.dumps({"blocks": blocks}, ensure_ascii=False, indent=2), backup=False)
+
+    # ---------------- Persistent symbol library ----------------
+    def _symbols_library_path(self) -> Path:
+        return default_settings_path().parent / "symbols_library.json"
+
+    def _load_symbols_library(self) -> List[dict]:
+        try:
+            data = json.loads(self._symbols_library_path().read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        if isinstance(data, dict):
+            data = data.get("symbols", [])
+        if not isinstance(data, list):
+            return []
+        return [s for s in data if isinstance(s, dict) and s.get("name")]
+
+    def _save_symbols_library(self, symbols: List[dict]):
+        path = self._symbols_library_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        write_text_atomic(path, json.dumps({"symbols": symbols}, ensure_ascii=False, indent=2), backup=False)
+
+    def _persist_symbol_to_library(self, sym: StepSymbol):
+        """Bewaar een geïmporteerd symbool zodat het tussen sessies/projecten beschikbaar blijft."""
+        try:
+            stored = [s for s in self._load_symbols_library() if s.get("name") != sym.name]
+            stored.append(asdict(sym))
+            self._save_symbols_library(stored)
+        except OSError:
+            pass
+
+    def _merge_library_symbols_into_session(self):
+        """Voeg opgeslagen bibliotheeksymbolen toe aan de huidige sessie (zonder bestaande te overschrijven)."""
+        added = False
+        for sym_d in self._load_symbols_library():
+            name = sym_d.get("name")
+            if not name or name in self.symbols:
+                continue
+            try:
+                self.symbols[name] = StepSymbol(
+                    name=str(sym_d["name"]),
+                    source_path=str(sym_d.get("source_path", "")),
+                    projection=str(sym_d.get("projection", "Top (XY)")),
+                    polylines=[[(float(x), float(y)) for x, y in line] for line in sym_d.get("polylines", [])],
+                    width_mm=float(sym_d.get("width_mm", 10.0)),
+                    height_mm=float(sym_d.get("height_mm", 10.0)),
+                )
+                added = True
+            except Exception:
+                continue
+        if added and hasattr(self, "symbol_list"):
+            self._refresh_symbol_list()
 
     def _refresh_block_list(self, select: Optional[str] = None):
         if not hasattr(self, "block_combo"):
@@ -1460,7 +1513,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             stroke_w = mm_width_to_px(c.line_width_mm, scale=0.4)
             for poly in world_polylines:
                 draw_polyline(poly, c.line_color, stroke_w)
-            draw_anchored_text(mm_to_px_x(c.x_mm), mm_to_px_y(c.y_mm - 4.0), c.connector_id, "#0d2238", font_connector, anchor="s")
+            draw_anchored_text(mm_to_px_x(c.x_mm + c.label_dx_mm), mm_to_px_y(c.y_mm + c.label_dy_mm), c.connector_id, "#0d2238", font_connector, anchor="center")
 
         bridge_specs = self._wire_bridge_specs()
         for w in self.wires:
@@ -2111,6 +2164,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.wire_tangent_drag_state = None
         self.wire_curve_drag_state = None
         self.table_resize_state = None
+        self.connector_label_drag_state = None
         self.panning = False
         self.pan_start = None
         self.redraw()
@@ -2296,12 +2350,17 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             return
         visible_rows = set(rows) | {0, 22}
         self._property_visible_rows = set(visible_rows)
-        for row in range(0, 28):
+        for row in range(0, 29):
             for widget in self._property_widgets_for_row(row):
                 if row in visible_rows:
                     widget.grid()
                 else:
                     widget.grid_remove()
+        # Standaard: toon de objectnaam als label, verberg het hernoem-veld.
+        # De connector-tak zet dit om wanneer precies één connector geselecteerd is.
+        if getattr(self, "prop_connector_id_entry", None) is not None:
+            self.prop_connector_id_entry.grid_remove()
+            self.prop_target_lbl.grid()
         self.after_idle(self._update_left_panel_scrollregion)
 
     def _wire_style_from_panel(self) -> str:
@@ -2891,10 +2950,21 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             conn = self._find_connector(ident)
             if not conn:
                 return
-            self._set_visible_property_rows({0, 1, 2, 3, 4, 16, 17, 18, 21, 22})
+            self._set_visible_property_rows({0, 1, 2, 3, 4, 16, 17, 18, 21, 22, 28})
             self._set_text_property_label("Notitie")
             selected_count = self._selection_count_for_kind("connector")
             self.prop_target_var.set(f"{selected_count} connectors geselecteerd" if selected_count > 1 else f"Connector {conn.connector_id}")
+            if selected_count > 1:
+                # Bij meerdere connectors: toon teller-label, geen hernoem-veld.
+                self.prop_connector_id_entry.grid_remove()
+                self.prop_target_lbl.grid()
+            else:
+                # Eén connector: maak de naam bewerkbaar via een invoerveld op rij 0.
+                self.prop_connector_id_var.set(conn.connector_id)
+                self.prop_target_lbl.grid_remove()
+                self.prop_connector_id_entry.grid()
+            self.prop_connector_label_dx_var.set(f"{conn.label_dx_mm:g}")
+            self.prop_connector_label_dy_var.set(f"{conn.label_dy_mm:g}")
             self.prop_color_var.set(conn.line_color)
             self.prop_color_b_var.set(self.default_wire_color_b)
             self.prop_width_var.set(f"{conn.line_width_mm:g}")
@@ -2914,6 +2984,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             self._set_prop_widget_state(self.prop_width_entry, True)
             self._set_prop_widget_state(self.prop_text_entry, True)
             self._set_prop_widget_state(self.prop_scale_entry, True)
+            self._set_prop_widget_state(self.prop_connector_label_dx_entry, True)
+            self._set_prop_widget_state(self.prop_connector_label_dy_entry, True)
             self._set_prop_combo_state(self.prop_wire_style_combo, False)
             self._set_prop_widget_state(self.prop_curve_entry, False)
             self._set_prop_widget_state(self.prop_twist_pitch_entry, False)
@@ -3108,6 +3180,43 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.redraw()
         self._commit_change(before, "Eigenschappen toegepast.")
 
+    def _rename_selected_connector(self):
+        """Hernoem de geselecteerde connector en werk draadverwijzingen mee."""
+        if getattr(self, "_renaming_connector", False):
+            return
+        if not self.selected or self.selected[0] != "connector":
+            return
+        if self._selection_count_for_kind("connector") > 1:
+            return
+        conn = self._find_connector(self.selected[1])
+        if not conn:
+            return
+        new_id = self.prop_connector_id_var.get().strip()
+        old_id = conn.connector_id
+        if not new_id or new_id == old_id:
+            self.prop_connector_id_var.set(old_id)
+            return
+        if any(c.connector_id == new_id for c in self.connectors if c is not conn):
+            self._show_error(f"Connector ID '{new_id}' bestaat al.")
+            self.prop_connector_id_var.set(old_id)
+            return
+        self._renaming_connector = True
+        try:
+            before = self._capture_before_change()
+            conn.connector_id = new_id
+            for wire in self.wires:
+                if wire.from_connector == old_id:
+                    wire.from_connector = new_id
+                if wire.to_connector == old_id:
+                    wire.to_connector = new_id
+            self._set_single_selection("connector", new_id)
+            self.load_selection_properties_to_panel()
+            self.redraw()
+            self._commit_change(before, f"Connector hernoemd naar {new_id}.")
+            self.status(f"Connector hernoemd: {old_id} -> {new_id}.")
+        finally:
+            self._renaming_connector = False
+
     def _apply_properties_to_items(
         self,
         items: set[Tuple[str, str]],
@@ -3226,6 +3335,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                     conn.part_number = self.prop_connector_part_var.get().strip()
                     conn.pin_count = max(1, int(try_float(self.prop_connector_pin_count_var.get(), 1)))
                     conn.pin_labels = parse_pin_labels(self.prop_connector_pin_labels_var.get())
+                    conn.label_dx_mm = round(try_float(self.prop_connector_label_dx_var.get(), conn.label_dx_mm), 3)
+                    conn.label_dy_mm = round(try_float(self.prop_connector_label_dy_var.get(), conn.label_dy_mm), 3)
                 touched_connectors = True
             elif kind == "table":
                 table = self._find_table(ident)
@@ -3486,6 +3597,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 height_mm=h,
             )
             self.active_symbol = name
+            self._persist_symbol_to_library(self.symbols[name])
             self._refresh_symbol_list(select_name=name)
             self.status(f"STEP geïmporteerd ({projection}): {step_path.name}")
             self.set_mode("place_connector")
@@ -3527,6 +3639,79 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.active_symbol = names[idx]
         if self.mode == "place_connector":
             self.status(f"Actieve connector: {self.active_symbol}")
+
+    def _on_symbol_activate(self, _event=None):
+        """Dubbelklik/Enter op een bibliotheeksymbool: start direct de plaatsmodus."""
+        self._on_symbol_select()
+        self._place_selected_symbol()
+        return "break"
+
+    def _symbol_name_at_list_index(self, index: int) -> Optional[str]:
+        names = sorted(self.symbols.keys())
+        if 0 <= index < len(names):
+            return names[index]
+        return None
+
+    def _show_symbol_context_menu(self, event):
+        index = self.symbol_list.nearest(event.y)
+        name = self._symbol_name_at_list_index(index)
+        if not name:
+            return
+        self.symbol_list.select_clear(0, tk.END)
+        self.symbol_list.select_set(index)
+        self._on_symbol_select()
+        menu = tk.Menu(self, tearoff=0)
+        menu.add_command(label=f"Plaats '{name}'", command=self._place_selected_symbol)
+        menu.add_separator()
+        menu.add_command(label="Verwijder uit bibliotheek", command=lambda n=name: self._remove_symbol_from_library(n))
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _remove_symbol_from_library(self, name: str):
+        if name not in self.symbols:
+            return
+        in_use = any(c.symbol_name == name for c in self.connectors)
+        if not messagebox.askyesno(
+            APP_TITLE,
+            f"'{name}' uit de bibliotheek verwijderen?"
+            + ("\n\nDe connector wordt op deze tekening nog gebruikt en blijft daar staan,\n"
+               "maar verschijnt niet meer in de bibliotheek bij een volgende sessie." if in_use else ""),
+            parent=self,
+        ):
+            return
+        stored = [s for s in self._load_symbols_library() if s.get("name") != name]
+        try:
+            self._save_symbols_library(stored)
+        except OSError:
+            pass
+        if in_use:
+            self.status(f"'{name}' uit bibliotheek verwijderd (blijft in gebruik op de tekening).")
+            return
+        self.symbols.pop(name, None)
+        if self.active_symbol == name:
+            self.active_symbol = None
+        self._refresh_symbol_list()
+        self.status(f"Connector '{name}' uit bibliotheek verwijderd.")
+
+    def _place_selected_symbol(self):
+        """Activeer de plaatsmodus voor de in de bibliotheek geselecteerde connector."""
+        if not self.symbols:
+            self._show_info("Importeer eerst een STEP connector via 'STEP import'.")
+            return
+        if not self.active_symbol or self.active_symbol not in self.symbols:
+            sel = self.symbol_list.curselection()
+            names = sorted(self.symbols.keys())
+            if sel and 0 <= sel[0] < len(names):
+                self.active_symbol = names[sel[0]]
+            elif names:
+                self.active_symbol = names[0]
+        if not self.active_symbol or self.active_symbol not in self.symbols:
+            self._show_info("Selecteer eerst een connector in de bibliotheek.")
+            return
+        self.set_mode("place_connector")
+        self.status(f"Klik op de tekening om '{self.active_symbol}' te plaatsen.")
 
     # ---------------- Coordinate transforms ----------------
     def world_to_canvas(self, x_mm: float, y_mm: float) -> Tuple[float, float]:
@@ -4567,6 +4752,28 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.request_redraw()
         self.status(f"Sleep de {label} van {wire.wire_id} om de kromming lokaal te finetunen.")
 
+    def _begin_connector_label_drag(self, connector: ConnectorInstance, world: Tuple[float, float]):
+        self._set_single_selection("connector", connector.connector_id)
+        self.load_selection_properties_to_panel()
+        self.drag_start_world = world
+        self.drag_original_world = None
+        self.drag_original_points = None
+        self.drag_original_wire_points = None
+        self.drag_original_items = None
+        self.leader_endpoint_drag_state = None
+        self.wire_endpoint_drag_state = None
+        self.wire_tangent_drag_state = None
+        self.wire_curve_drag_state = None
+        self.table_resize_state = None
+        self.connector_label_drag_state = {
+            "connector_id": connector.connector_id,
+            "label0": (connector.label_dx_mm, connector.label_dy_mm),
+        }
+        self._drag_history_before = self._capture_before_change()
+        self._drag_history_changed = False
+        self.request_redraw()
+        self.status(f"Sleep de naam van {connector.connector_id} naar de gewenste positie.")
+
     def _curve_handle_hit_wire(self, point: Tuple[float, float]) -> Optional[WirePath]:
         wire = self._selected_curve_wire()
         if not wire:
@@ -5374,6 +5581,10 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                     return
 
         if self.mode == "select" and not selection_modifier and not self.selected_items:
+            label_conn = self._connector_label_handle_hit(raw_world)
+            if label_conn:
+                self._begin_connector_label_drag(label_conn, raw_world)
+                return
             if self.selected and self.selected[0] == "wire":
                 endpoint_hit = self._wire_endpoint_handle_hit(raw_world)
                 if endpoint_hit:
@@ -5710,6 +5921,26 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 self.request_redraw()
             return
 
+        if self.connector_label_drag_state:
+            state = self.connector_label_drag_state
+            conn = self._find_connector(state["connector_id"])
+            if not conn:
+                self.connector_label_drag_state = None
+                return
+            cur = self.canvas_to_world(event.x, event.y)
+            start = self.drag_start_world or cur
+            dx = cur[0] - start[0]
+            dy = cur[1] - start[1]
+            label0 = state["label0"]
+            conn.label_dx_mm = round(label0[0] + dx, 3)
+            conn.label_dy_mm = round(label0[1] + dy, 3)
+            self.prop_connector_label_dx_var.set(f"{conn.label_dx_mm:g}")
+            self.prop_connector_label_dy_var.set(f"{conn.label_dy_mm:g}")
+            self._drag_history_changed = True
+            self.status(f"Naam {conn.connector_id}: offset x={conn.label_dx_mm:.1f} mm, y={conn.label_dy_mm:.1f} mm")
+            self.request_redraw()
+            return
+
         if self.mode != "select":
             return
         if not self.selected or not self.drag_start_world:
@@ -5781,6 +6012,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         had_endpoint_drag = self.wire_endpoint_drag_state is not None
         had_tangent_drag = self.wire_tangent_drag_state is not None
         had_curve_drag = self.wire_curve_drag_state is not None
+        had_label_drag = self.connector_label_drag_state is not None
         if self.wire_endpoint_drag_state:
             state = self.wire_endpoint_drag_state
             wire = self._find_wire(state["wire_id"])
@@ -5811,6 +6043,10 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.wire_tangent_drag_state = None
         self.wire_curve_drag_state = None
         self.table_resize_state = None
+        self.connector_label_drag_state = None
+        if had_label_drag and self.selected and self.selected[0] == "connector":
+            self.load_selection_properties_to_panel()
+            self.request_redraw()
         if had_leader_endpoint_drag and self.selected and self.selected[0] == "leader":
             self.load_selection_properties_to_panel()
             self.request_redraw()
@@ -6427,6 +6663,30 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             connector.y_mm + local_bbox[3],
         )
 
+    def _connector_label_world_pos(self, connector) -> Tuple[float, float]:
+        return (connector.x_mm + connector.label_dx_mm, connector.y_mm + connector.label_dy_mm)
+
+    def _connector_label_canvas_bbox(self, connector) -> Tuple[float, float, float, float]:
+        cx, cy = self.world_to_canvas(*self._connector_label_world_pos(connector))
+        text = connector.connector_id or ""
+        half_w = max(10.0, len(text) * 4.0 + 4.0)
+        half_h = 8.0
+        return (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+
+    def _connector_label_handle_hit(self, world: Tuple[float, float]) -> Optional[ConnectorInstance]:
+        """Geef de connector terug waarvan het naamlabel onder het wereldpunt ligt
+        (alleen voor de geselecteerde connector, zodat de handle zichtbaar is)."""
+        if not self.selected or self.selected[0] != "connector":
+            return None
+        conn = self._find_connector(self.selected[1])
+        if not conn:
+            return None
+        px, py = self.world_to_canvas(world[0], world[1])
+        x1, y1, x2, y2 = self._connector_label_canvas_bbox(conn)
+        if x1 <= px <= x2 and y1 <= py <= y2:
+            return conn
+        return None
+
     def _table_col_widths(self, table: TableBox) -> List[float]:
         widths = [float(w) for w in table.col_widths_mm if float(w) > 0.0]
         if len(widths) != table.cols:
@@ -6560,17 +6820,20 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         before = self._capture_before_change()
         max_side = max(sym.width_mm, sym.height_mm, 0.001)
         auto_scale = clamp(32.0 / max_side, 0.2, 3.0)
-        self.connectors.append(
-            ConnectorInstance(
-                connector_id=ref,
-                symbol_name=self.active_symbol,
-                x_mm=x_mm,
-                y_mm=y_mm,
-                scale=auto_scale,
-                line_color=self.default_connector_line_color,
-                line_width_mm=self.default_connector_line_width_mm,
-            )
+        connector = ConnectorInstance(
+            connector_id=ref,
+            symbol_name=self.active_symbol,
+            x_mm=x_mm,
+            y_mm=y_mm,
+            scale=auto_scale,
+            line_color=self.default_connector_line_color,
+            line_width_mm=self.default_connector_line_width_mm,
         )
+        self.connectors.append(connector)
+        # Plaats de naam standaard net boven het symbool (los verplaatsbaar daarna).
+        bx1, by1, bx2, by2 = self._connector_world_bbox(connector)
+        connector.label_dx_mm = round((bx1 + bx2) / 2.0 - x_mm, 3)
+        connector.label_dy_mm = round(by1 - y_mm - 3.0, 3)
         self._set_single_selection("connector", ref)
         self.load_selection_properties_to_panel()
         self.redraw()
@@ -7038,6 +7301,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 part_number=obj.part_number,
                 pin_count=obj.pin_count,
                 pin_labels=list(obj.pin_labels),
+                label_dx_mm=obj.label_dx_mm,
+                label_dy_mm=obj.label_dy_mm,
             )
             self.connectors.append(clone)
             self._set_single_selection("connector", nid)

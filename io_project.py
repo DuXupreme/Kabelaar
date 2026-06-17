@@ -257,6 +257,8 @@ class ProjectIOMixin:
                         part_number=str(raw.get("part_number", "")),
                         pin_count=max(1, int(raw.get("pin_count", 1))),
                         pin_labels=[str(label).strip() for label in raw.get("pin_labels", []) if str(label).strip()],
+                        label_dx_mm=float(raw.get("label_dx_mm", 0.0)),
+                        label_dy_mm=float(raw.get("label_dy_mm", -6.0)),
                     )
                 )
             except Exception:
@@ -479,6 +481,7 @@ class ProjectIOMixin:
             except Exception:
                 continue
 
+        self._merge_library_symbols_into_session()
         self._refresh_symbol_list()
         self._sync_paper_preset_var()
         self._clear_selection()
@@ -527,6 +530,7 @@ class ProjectIOMixin:
         self._sync_wire_bridge_vars()
         self.set_mode("select")
         self._clear_selection()
+        self._merge_library_symbols_into_session()
         self._refresh_symbol_list()
         self.load_selection_properties_to_panel()
         self._reset_history()

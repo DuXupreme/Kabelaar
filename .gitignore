@@ -21,5 +21,9 @@ __pycache__/
 # Persoonlijke gebruikersinstellingen (wordt op runtime aangemaakt)
 settings.json
 
+# Op runtime aangemaakte bibliotheken (lokaal, niet versiebeheerd)
+blocks_library.json
+symbols_library.json
+
 # Claude Code tooling
 .claude/

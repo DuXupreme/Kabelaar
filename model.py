@@ -114,6 +114,8 @@ class ConnectorInstance:
     part_number: str = ""
     pin_count: int = 1
     pin_labels: List[str] = field(default_factory=list)
+    label_dx_mm: float = 0.0
+    label_dy_mm: float = -6.0
 
 
 @dataclass

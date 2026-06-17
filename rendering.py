@@ -129,13 +129,16 @@ class RenderingMixin:
                 for pts in self._connector_canvas_polylines(c):
                     self.canvas.create_line(*pts, fill=c.line_color, width=stroke_width_px, smooth=False)
 
-            tx, ty = self.world_to_canvas(c.x_mm, c.y_mm)
-            self.canvas.create_text(tx, ty - 14, text=c.connector_id, fill="#0d2238", font=("Segoe UI", 9, "bold"))
+            lx, ly = self.world_to_canvas(c.x_mm + c.label_dx_mm, c.y_mm + c.label_dy_mm)
+            self.canvas.create_text(lx, ly, text=c.connector_id, fill="#0d2238", font=("Segoe UI", 9, "bold"))
 
             if self._is_item_selected("connector", c.connector_id):
                 x1, y1 = self.world_to_canvas(bx1, by1)
                 x2, y2 = self.world_to_canvas(bx2, by2)
                 self.canvas.create_rectangle(x1, y1, x2, y2, outline="#d61f1f", dash=(4, 4), width=2)
+                # Sleephandle rond het label zodat de naam los verplaatsbaar is.
+                lbx1, lby1, lbx2, lby2 = self._connector_label_canvas_bbox(c)
+                self.canvas.create_rectangle(lbx1, lby1, lbx2, lby2, outline="#f08c00", dash=(2, 2), width=1)
 
     def _draw_image_notes(self):
         if not self.image_notes:
@@ -446,7 +449,9 @@ class RenderingMixin:
                 lines.append(
                     f'<polyline points="{" ".join(coords)}" fill="none" stroke="{escape(c.line_color)}" stroke-width="{max(0.15, c.line_width_mm * 0.4):.3f}"/>'
                 )
-            lines.append(f'<text x="{c.x_mm:.3f}" y="{c.y_mm - 4:.3f}" text-anchor="middle" class="txt">{escape(c.connector_id)}</text>')
+            label_x = c.x_mm + c.label_dx_mm
+            label_y = c.y_mm + c.label_dy_mm
+            lines.append(f'<text x="{label_x:.3f}" y="{label_y:.3f}" text-anchor="middle" class="txt">{escape(c.connector_id)}</text>')
         return lines
 
     def _svg_wire_lines(self) -> List[str]:
