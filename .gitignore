@@ -1,0 +1,16 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+
+# Automatische / handmatige backups
+*.bak
+*.bak_*
+
+# PyInstaller bouw-output (opnieuw te genereren uit de bron)
+/build/
+/build_exe/
+/dist/
+/release/
+
+# Claude Code tooling
+.claude/

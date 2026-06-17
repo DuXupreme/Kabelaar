@@ -1,0 +1,22 @@
+{
+  "kabelboom_tekenstudio": {
+    "ui_scale_percent": 70,
+    "side_panel_visible": true,
+    "visible_panels": {
+      "tools": true,
+      "properties": true,
+      "symbols": true,
+      "project": true,
+      "files": true
+    },
+    "collapsed_panels": {
+      "tools": false,
+      "properties": false,
+      "symbols": false,
+      "project": false,
+      "files": false
+    },
+    "side_panel_width_px": 354,
+    "last_project_dir": "C:\\Users\\Melle Poeckling\\OneDrive - Stichting Hogeschool Utrecht\\A_Jaar_3\\Quest\\CoDeX8_kabelaar"
+  }
+}
