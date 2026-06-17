@@ -84,4 +84,19 @@ Of via:
 Als PowerShell scripts lokaal geblokkeerd zijn, gebruik dan de `.bat` starter.
 
 ## Ontwikkelen / testen
-Zie `README_ontwikkelen.md` voor dependency-installatie en het draaien van tests.
+
+Gebruik Python 3.10 of nieuwer. Installeer de afhankelijkheden:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+`Pillow` is nodig voor afbeeldingimport en PNG/PDF-export. De basisfuncties blijven grotendeels werken zonder extra pakketten.
+
+Tests draaien:
+
+```powershell
+python -m unittest discover -s tests
+```
+
+JSON-projecten worden atomisch opgeslagen via een tijdelijk bestand; bij overschrijven blijft de vorige versie als `.bak` naast het project staan. Persoonlijke voorkeuren (UI-schaal, laatst gebruikte mappen) staan in `settings.json` naast de scripts en horen niet bij een kabelboomproject zelf.

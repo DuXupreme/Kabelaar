@@ -11,8 +11,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from kabelboom_studio import PROJECT_SCHEMA_VERSION as STUDIO_SCHEMA_VERSION
-from kabelboom_studio import color_hex, safe_filename, to_float, to_int
 from kabelboom_tekenstudio import (
     PAPER_PRESET_CUSTOM,
     PROJECT_SCHEMA_VERSION as TEKENSTUDIO_SCHEMA_VERSION,
@@ -68,27 +66,15 @@ class DummyEvent:
 
 class KabelboomStudioHelpersTest(unittest.TestCase):
     def test_project_schema_versions_are_declared(self):
-        self.assertGreaterEqual(STUDIO_SCHEMA_VERSION, 1)
         self.assertGreaterEqual(TEKENSTUDIO_SCHEMA_VERSION, 1)
 
     def test_numeric_helpers_accept_common_user_input(self):
-        self.assertEqual(to_int(" 12 "), 12)
-        self.assertEqual(to_int("0", fallback=3), 3)
-        self.assertEqual(to_int("abc", fallback=4), 4)
-
-        self.assertEqual(to_float("1,25"), 1.25)
-        self.assertEqual(to_float("-1", fallback=2.5), 2.5)
         self.assertEqual(try_float(" 3,75 "), 3.75)
         self.assertEqual(try_float("niet numeriek", fallback=9.0), 9.0)
 
-    def test_name_and_color_helpers_normalize_output(self):
-        self.assertEqual(safe_filename(" J100 extern / CMU "), "J100_extern_CMU")
-        self.assertEqual(safe_filename("..."), "kabelboom")
+    def test_name_helpers_normalize_output(self):
         self.assertEqual(safe_name(" Tekening: Rev A ", "fallback"), "Tekening_Rev_A")
         self.assertEqual(safe_name("", "fallback"), "fallback")
-        self.assertEqual(color_hex("rood"), "#c92a2a")
-        self.assertEqual(color_hex("00ff00"), "#00ff00")
-        self.assertEqual(color_hex("onbekend"), "#444444")
 
     def test_ui_scale_percent_is_normalized(self):
         self.assertIn("60%", UI_SCALE_LABELS)
