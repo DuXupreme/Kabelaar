@@ -15,6 +15,9 @@ __pycache__/
 # Velopack release-output
 /Releases/
 
+# Bij de build gegenereerde versie (zie tools/build_release.ps1)
+/_version.py
+
 # Persoonlijke gebruikersinstellingen (wordt op runtime aangemaakt)
 settings.json
 

@@ -42,9 +42,29 @@ $Splash   = Join-Path $root 'assets/splash.png'
 $RepoUrl  = 'https://github.com/DuXupreme/Kabelaar'
 $OutDir   = Join-Path $root 'Releases'
 
+# --- 0. versie in de app bakken ------------------------------------------
+# updater.py leest APP_VERSION hieruit om met de release-feed te vergelijken.
+Set-Content -Path (Join-Path $root '_version.py') -Encoding utf8 -Value @"
+# Automatisch gegenereerd door tools/build_release.ps1 -- niet handmatig wijzigen.
+APP_VERSION = "$Version"
+"@
+
 # --- 1. PyInstaller -------------------------------------------------------
+# Eerst zelf opruimen met -Force; PyInstaller's eigen --clean faalt op
+# read-only/door OneDrive gelockte .pyc-bestanden onder build/.
+function Remove-Tree([string] $p) {
+    if (-not (Test-Path $p)) { return }
+    for ($i = 0; $i -lt 3; $i++) {
+        try { Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop; return }
+        catch { Start-Sleep -Milliseconds 600 }
+    }
+    Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop
+}
+Remove-Tree (Join-Path $root 'build')
+Remove-Tree (Join-Path $root 'dist')
+
 Write-Host "==> PyInstaller build ($Version)..." -ForegroundColor Cyan
-python -m PyInstaller --noconfirm --clean "Kabelboom Tekenstudio.spec"
+python -m PyInstaller --noconfirm "Kabelboom Tekenstudio.spec"
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller faalde (exit $LASTEXITCODE)" }
 if (-not (Test-Path (Join-Path $PackDir $MainExe))) {
     throw "Verwachte exe niet gevonden: $(Join-Path $PackDir $MainExe)"

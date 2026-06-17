@@ -25,9 +25,16 @@ from tkinter import colorchooser, filedialog, font as tkfont, messagebox, simple
 from typing import Dict, List, Optional, Tuple
 from xml.sax.saxutils import escape
 
+import threading
+
 from app_settings import default_settings_path, existing_dir, load_app_settings, parent_dir, update_app_settings
 from project_io import write_text_atomic
 from ui_scaling import UI_SCALE_LABELS, enable_dpi_awareness, normalize_ui_scale_percent, schedule_window_scaling, set_ui_scale
+
+try:
+    import updater
+except Exception:
+    updater = None
 
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageGrab, ImageTk
@@ -1200,6 +1207,11 @@ class HarnessDrawingStudio(tk.Tk):
         self._mark_saved()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        self._update_in_progress = False
+        # Stille controle op updates kort na het opstarten.
+        if updater is not None and updater.is_update_supported():
+            self.after(3000, lambda: self._start_update_check(silent=True))
+
     # ---------------- UI ----------------
     def _settings_bool(self, key: str, fallback: bool) -> bool:
         value = self.settings.get(key, fallback)
@@ -2105,7 +2117,94 @@ class HarnessDrawingStudio(tk.Tk):
         tools_menu.add_command(label="Eigenschappenpaneel focussen", command=self.focus_properties_panel)
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Zoek naar updates...", command=self.check_for_updates_interactive)
+        menubar.add_cascade(label="Help", menu=help_menu)
+
         self.config(menu=menubar)
+
+    # ---------------- Auto-update ----------------
+    def check_for_updates_interactive(self):
+        """Menu 'Zoek naar updates...': handmatige controle met terugkoppeling."""
+        if updater is None or not updater.is_update_supported():
+            messagebox.showinfo(
+                "Updates",
+                "Automatisch bijwerken is alleen beschikbaar in de "
+                "geinstalleerde versie van de app.",
+            )
+            return
+        self._start_update_check(silent=False)
+
+    def _start_update_check(self, silent: bool):
+        if updater is None or getattr(self, "_update_in_progress", False):
+            return
+
+        def worker():
+            info, error = None, None
+            try:
+                info = updater.check_for_updates()
+            except Exception as exc:  # netwerk-/feedfout
+                error = exc
+            self.after(0, lambda: self._on_update_check_done(info, error, silent))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_check_done(self, info, error, silent: bool):
+        if error is not None:
+            if not silent:
+                messagebox.showwarning(
+                    "Updates", f"Kon niet op updates controleren:\n{error}"
+                )
+            return
+        if info is None:
+            if not silent:
+                messagebox.showinfo("Updates", "Je gebruikt de nieuwste versie.")
+            return
+        if messagebox.askyesno(
+            "Update beschikbaar",
+            f"Versie {info.version} is beschikbaar.\n"
+            "Nu downloaden en installeren? De app wordt daarna opnieuw gestart.",
+        ):
+            self._run_update(info)
+
+    def _run_update(self, info):
+        self._update_in_progress = True
+        win = tk.Toplevel(self)
+        win.title("Bijwerken")
+        win.transient(self)
+        win.resizable(False, False)
+        win.protocol("WM_DELETE_WINDOW", lambda: None)  # niet sluiten tijdens download
+        ttk.Label(
+            win, text=f"Versie {info.version} wordt gedownload..."
+        ).pack(padx=24, pady=(18, 10))
+        bar = ttk.Progressbar(win, length=340, mode="determinate", maximum=100)
+        bar.pack(padx=24, pady=(0, 18))
+        win.update_idletasks()
+
+        def progress(done, total):
+            pct = int(done * 100 / total) if total else 0
+            self.after(0, lambda: bar.configure(value=pct))
+
+        def worker():
+            try:
+                pkg = updater.download_package(info, progress)
+                updater.apply_and_restart(pkg)
+            except Exception as exc:
+                self.after(0, lambda: self._update_failed(win, exc))
+                return
+            self.after(0, self.destroy)  # Update.exe wacht op afsluiten en herstart
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _update_failed(self, win, exc):
+        self._update_in_progress = False
+        try:
+            win.destroy()
+        except Exception:
+            pass
+        messagebox.showerror(
+            "Bijwerken mislukt", f"Kon de update niet voltooien:\n{exc}"
+        )
 
     def _bind_events(self):
         self.canvas.bind("<Button-1>", self.on_left_down)

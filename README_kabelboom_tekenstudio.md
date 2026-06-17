@@ -133,3 +133,21 @@ script aan om het ontwerp te wijzigen.
 
 De app vangt de Velopack lifecycle-hooks (`--veloapp-*`) af en sluit dan stil
 af, zodat er tijdens (de)installatie en updates geen venster verschijnt.
+
+### Automatische updates
+
+De geinstalleerde app controleert kort na het opstarten stil op updates en
+toont een melding zodra er een nieuwere versie op GitHub Releases staat, met de
+optie om die meteen te downloaden en installeren (de app herstart daarna).
+Handmatig kan het ook via **Help -> Zoek naar updates...**.
+
+De logica zit in `updater.py`: het leest de release-feed (`releases.win.json`)
+van de laatste GitHub-release, vergelijkt met de ingebakken `APP_VERSION` en
+laat de meegeleverde `Update.exe` het pakket toepassen. Updaten werkt alleen in
+de geinstalleerde versie, niet bij draaien vanuit broncode.
+
+Een update uitrollen is dus simpelweg een hogere versie publiceren:
+
+```powershell
+./tools/build_release.ps1 -Version 1.0.1 -Publish
+```
