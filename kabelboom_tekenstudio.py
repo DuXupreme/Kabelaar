@@ -30,6 +30,13 @@ import threading
 from app_settings import default_settings_path, existing_dir, load_app_settings, parent_dir, update_app_settings
 from project_io import write_text_atomic
 from ui_scaling import UI_SCALE_LABELS, enable_dpi_awareness, normalize_ui_scale_percent, schedule_window_scaling, set_ui_scale
+import theme as ui_theme
+from ui_tooltip import attach as attach_tooltip
+
+try:
+    import sv_ttk
+except Exception:
+    sv_ttk = None
 
 try:
     import updater
@@ -1030,6 +1037,12 @@ class HarnessDrawingStudio(tk.Tk):
         self._ui_scale_percent = normalize_ui_scale_percent(self.settings.get("ui_scale_percent", 100))
         schedule_window_scaling(self, design_size=(1500, 920), min_size=(1200, 760), apply_tk_scaling=False)
 
+        # Pas het thema toe vóór het vastleggen van basis-padding/fonts, zodat
+        # de sv-ttk styling als uitgangspunt wordt gemeten.
+        self._app_theme = ui_theme.normalize_theme(self.settings.get("theme", "light"))
+        self.app_theme_var = tk.StringVar(value=self._app_theme)
+        self._apply_sv_theme()
+
         default_paper = paper_preset_dimensions(DEFAULT_PAPER_PRESET) or (420.0, 297.0)
         self.paper_w_mm = default_paper[0]
         self.paper_h_mm = default_paper[1]
@@ -1252,16 +1265,56 @@ class HarnessDrawingStudio(tk.Tk):
             except tk.TclError:
                 continue
 
+    def _apply_sv_theme(self):
+        if sv_ttk is not None:
+            try:
+                sv_ttk.set_theme(self._app_theme)
+            except Exception:
+                pass
+
     def _configure_app_style(self):
         style = ttk.Style(self)
+        t = ui_theme.tokens(getattr(self, "_app_theme", "light"))
         try:
             style.configure("PanelHeader.TButton", anchor="w")
             style.configure("Tool.TButton", padding=(6, 4))
             style.configure("Primary.TButton", padding=(8, 5))
-            style.configure("Subtle.TLabel", foreground="#475569")
-            style.configure("Status.TLabel", foreground="#334155")
+            style.configure("Subtle.TLabel", foreground=t["subtle_fg"])
+            style.configure("Status.TLabel", foreground=t["status_fg"])
         except tk.TclError:
             pass
+
+    def _apply_theme_colors(self):
+        """Werk de niet-ttk chrome (canvas, grip, sidebar) bij aan het thema."""
+        t = ui_theme.tokens(getattr(self, "_app_theme", "light"))
+        if hasattr(self, "canvas"):
+            try:
+                self.canvas.configure(background=t["canvas_bg"])
+            except tk.TclError:
+                pass
+        if hasattr(self, "side_panel_resize_grip"):
+            try:
+                self.side_panel_resize_grip.configure(background=t["grip"])
+            except tk.TclError:
+                pass
+        if hasattr(self, "left_panel_canvas"):
+            try:
+                bg = ttk.Style().lookup("TFrame", "background") or self.cget("bg")
+                self.left_panel_canvas.configure(background=bg)
+            except tk.TclError:
+                pass
+
+    def set_app_theme(self, name: str):
+        name = ui_theme.normalize_theme(name)
+        self._app_theme = name
+        self.app_theme_var.set(name)
+        self._apply_sv_theme()
+        self._configure_app_style()
+        self._apply_control_ui_scale()
+        self._apply_theme_colors()
+        self._update_mode_buttons()
+        self._save_settings(theme=name)
+        self.request_redraw()
 
     def _ui_scale_factor(self) -> float:
         return normalize_ui_scale_percent(getattr(self, "_ui_scale_percent", 100)) / 100.0
@@ -1351,7 +1404,7 @@ class HarnessDrawingStudio(tk.Tk):
         self._side_panel_drag_start_x = event.x_root
         self._side_panel_drag_start_width = self._side_panel_width()
         if hasattr(self, "side_panel_resize_grip"):
-            self.side_panel_resize_grip.configure(bg="#94a3b8")
+            self.side_panel_resize_grip.configure(bg=ui_theme.color(self._app_theme, "grip_active"))
         return "break"
 
     def _on_side_panel_resize_drag(self, event):
@@ -1367,7 +1420,7 @@ class HarnessDrawingStudio(tk.Tk):
         self._side_panel_drag_start_x = None
         self._side_panel_drag_start_width = None
         if hasattr(self, "side_panel_resize_grip"):
-            self.side_panel_resize_grip.configure(bg="#cbd5e1")
+            self.side_panel_resize_grip.configure(bg=ui_theme.color(self._app_theme, "grip"))
         return "break"
 
     def _create_left_panel_section(self, key: str, parent, row: int):
@@ -1383,6 +1436,7 @@ class HarnessDrawingStudio(tk.Tk):
         button.grid(row=0, column=0, sticky="ew")
         hide_button = ttk.Button(header, text="x", width=3, command=lambda k=key: self.set_panel_visible(k, False))
         hide_button.grid(row=0, column=1, padx=(4, 0))
+        attach_tooltip(hide_button, "Dit paneel verbergen (terughalen via Beeld ▸ Panelen)")
 
         body = ttk.Frame(wrapper)
         body.grid(row=1, column=0, sticky="ew", pady=(4, 0))
@@ -1503,11 +1557,15 @@ class HarnessDrawingStudio(tk.Tk):
             "place_connector": "Connector",
             "draw_table": "Tabel",
         }
+        active_style = "Accent.TButton" if sv_ttk is not None else "Tool.TButton"
+        use_prefix = sv_ttk is None
         for mode, buttons in self._mode_buttons.items():
             label = labels.get(mode, mode)
+            is_active = mode == self.mode
             for button in buttons:
                 try:
-                    button.configure(text=(f"> {label}" if mode == self.mode else label))
+                    text = f"> {label}" if (is_active and use_prefix) else label
+                    button.configure(text=text, style=active_style if is_active else "Tool.TButton")
                 except tk.TclError:
                     continue
 
@@ -1529,8 +1587,12 @@ class HarnessDrawingStudio(tk.Tk):
         side_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         side_header.columnconfigure(0, weight=1)
         ttk.Label(side_header, text="Kabelboom studio", style="Status.TLabel").grid(row=0, column=0, sticky="w")
-        ttk.Button(side_header, text="Alles", width=6, command=self.expand_all_panels).grid(row=0, column=1, sticky="e", padx=(4, 0))
-        ttk.Button(side_header, text="<<", width=3, command=lambda: self.set_side_panel_visible(False)).grid(row=0, column=2, sticky="e", padx=(4, 0))
+        expand_all_btn = ttk.Button(side_header, text="Alles", width=6, command=self.expand_all_panels)
+        expand_all_btn.grid(row=0, column=1, sticky="e", padx=(4, 0))
+        attach_tooltip(expand_all_btn, "Alle panelen uitklappen")
+        hide_side_btn = ttk.Button(side_header, text="<<", width=3, command=lambda: self.set_side_panel_visible(False))
+        hide_side_btn.grid(row=0, column=2, sticky="e", padx=(4, 0))
+        attach_tooltip(hide_side_btn, "Zijpaneel verbergen")
         left.bind("<Button-3>", self._show_panel_context_menu, add="+")
         side_header.bind("<Button-3>", self._show_panel_context_menu, add="+")
 
@@ -1588,18 +1650,14 @@ class HarnessDrawingStudio(tk.Tk):
         button_col.columnconfigure(0, weight=1)
         button_col.columnconfigure(1, weight=1)
 
-        self._panel_note(button_col, "Kies eerst wat je wilt doen; het eigenschappenpaneel past zich daarop aan.", 0, columnspan=2)
-        self._make_mode_button(button_col, "select", "Selecteer", 1, 0, padx=(0, 3), pady=2)
-        self._make_mode_button(button_col, "draw_wire", "Draad", 1, 1, padx=(3, 0), pady=2)
-        self._make_mode_button(button_col, "draw_leader", "Leader", 2, 0, padx=(0, 3), pady=2)
-        self._make_mode_button(button_col, "place_connector", "Connector", 2, 1, padx=(3, 0), pady=2)
-        self._make_mode_button(button_col, "draw_table", "Tabel", 3, 0, padx=(0, 3), pady=2)
-        self._make_mode_button(button_col, "draw_dimension", "Maatlijn", 3, 1, padx=(3, 0), pady=2)
-        ttk.Button(button_col, text="STEP import", style="Tool.TButton", command=self.import_step_symbol).grid(row=4, column=0, sticky="ew", padx=(0, 3), pady=(8, 2))
-        ttk.Button(button_col, text="Plakken", style="Tool.TButton", command=self.paste_from_clipboard).grid(row=4, column=1, sticky="ew", padx=(3, 0), pady=(8, 2))
-        ttk.Button(button_col, text="Afbeelding", style="Tool.TButton", command=self.import_image_note).grid(row=5, column=0, sticky="ew", padx=(0, 3), pady=2)
-        ttk.Button(button_col, text="Eigenschappen", style="Tool.TButton", command=self.focus_properties_panel).grid(row=5, column=1, sticky="ew", padx=(3, 0), pady=2)
-        ttk.Button(button_col, text="Verwijder", style="Tool.TButton", command=self.delete_selected).grid(row=6, column=0, columnspan=2, sticky="ew", pady=2)
+        self._panel_note(button_col, "Kies een tekenmodus in de werkbalk bovenaan. Hieronder staan invoeg- en bewerkacties.", 0, columnspan=2)
+        step_btn = ttk.Button(button_col, text="STEP import", style="Tool.TButton", command=self.import_step_symbol)
+        step_btn.grid(row=1, column=0, sticky="ew", padx=(0, 3), pady=2)
+        attach_tooltip(step_btn, "Connector uit STEP-bestand importeren (met 3D-preview en projectiezijde)")
+        ttk.Button(button_col, text="Plakken", style="Tool.TButton", command=self.paste_from_clipboard).grid(row=1, column=1, sticky="ew", padx=(3, 0), pady=2)
+        ttk.Button(button_col, text="Afbeelding", style="Tool.TButton", command=self.import_image_note).grid(row=2, column=0, sticky="ew", padx=(0, 3), pady=2)
+        ttk.Button(button_col, text="Eigenschappen", style="Tool.TButton", command=self.focus_properties_panel).grid(row=2, column=1, sticky="ew", padx=(3, 0), pady=2)
+        ttk.Button(button_col, text="Verwijder", style="Tool.TButton", command=self.delete_selected).grid(row=3, column=0, columnspan=2, sticky="ew", pady=2)
 
         project_body = self._create_left_panel_section("project", self.left_panel, 3)
         meta = ttk.Frame(project_body)
@@ -1691,12 +1749,19 @@ class HarnessDrawingStudio(tk.Tk):
         ttk.Button(io, text="Open", style="Tool.TButton", command=self.open_project).grid(row=0, column=1, sticky="ew", padx=(3, 0), pady=2)
         ttk.Button(io, text="Opslaan", style="Tool.TButton", command=self.save_project).grid(row=1, column=0, sticky="ew", padx=(0, 3), pady=2)
         ttk.Button(io, text="Opslaan als", style="Tool.TButton", command=self.save_project_as).grid(row=1, column=1, sticky="ew", padx=(3, 0), pady=2)
-        ttk.Button(io, text="SVG", style="Tool.TButton", command=self.export_svg).grid(row=2, column=0, sticky="ew", padx=(0, 3), pady=(8, 2))
-        ttk.Button(io, text="PNG", style="Tool.TButton", command=self.export_png).grid(row=2, column=1, sticky="ew", padx=(3, 0), pady=(8, 2))
-        ttk.Button(io, text="PDF", style="Tool.TButton", command=self.export_pdf).grid(row=3, column=0, sticky="ew", padx=(0, 3), pady=2)
-        ttk.Button(io, text="Controle", style="Tool.TButton", command=self.run_project_check).grid(row=3, column=1, sticky="ew", padx=(3, 0), pady=2)
-        ttk.Button(io, text="Netlist CSV", style="Tool.TButton", command=self.export_netlist_csv).grid(row=4, column=0, sticky="ew", padx=(0, 3), pady=2)
-        ttk.Button(io, text="BOM CSV", style="Tool.TButton", command=self.export_bom_csv).grid(row=4, column=1, sticky="ew", padx=(3, 0), pady=2)
+        export_buttons = [
+            ("SVG", self.export_svg, "Exporteer de tekening als SVG (vectorformaat)", 2, 0, (8, 2)),
+            ("PNG", self.export_png, "Exporteer de tekening als PNG-afbeelding", 2, 1, (8, 2)),
+            ("PDF", self.export_pdf, "Exporteer de tekening als PDF", 3, 0, 2),
+            ("Controle", self.run_project_check, "Projectcontrole (DRC): controleer draden tegen connector-pinnen", 3, 1, 2),
+            ("Netlist CSV", self.export_netlist_csv, "Exporteer netlist (draadverbindingen) als CSV", 4, 0, 2),
+            ("BOM CSV", self.export_bom_csv, "Exporteer stuklijst (BOM) als CSV", 4, 1, 2),
+        ]
+        for text, command, tip, r, c, pady in export_buttons:
+            padx = (0, 3) if c == 0 else (3, 0)
+            btn = ttk.Button(io, text=text, style="Tool.TButton", command=command)
+            btn.grid(row=r, column=c, sticky="ew", padx=padx, pady=pady)
+            attach_tooltip(btn, tip)
 
         properties_body = self._create_left_panel_section("properties", self.left_panel, 1)
         self.property_hint_var = tk.StringVar(value="Selecteer iets of kies een tekenmodus; alleen relevante velden blijven zichtbaar.")
@@ -1875,18 +1940,7 @@ class HarnessDrawingStudio(tk.Tk):
 
         palette_row = ttk.Frame(props)
         palette_row.grid(row=21, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        palette_colors = [
-            "#111111",
-            "#ffffff",
-            "#c92a2a",
-            "#1d4ed8",
-            "#2f9e44",
-            "#e7b416",
-            "#e67700",
-            "#7b2cbf",
-            "#25364a",
-            "#1f4e79",
-        ]
+        palette_colors = ui_theme.DRAWING_PALETTE
         self.prop_palette_buttons: List[tk.Button] = []
         for idx, color in enumerate(palette_colors):
             btn = tk.Button(
@@ -1913,7 +1967,7 @@ class HarnessDrawingStudio(tk.Tk):
         self._bind_panel_context_handlers(self.left_panel)
         self.after_idle(self._update_left_panel_scrollregion)
 
-        self.side_panel_resize_grip = tk.Frame(self, width=6, background="#cbd5e1", cursor="sb_h_double_arrow", bd=0)
+        self.side_panel_resize_grip = tk.Frame(self, width=6, background=ui_theme.color(self._app_theme, "grip"), cursor="sb_h_double_arrow", bd=0)
         self.side_panel_resize_grip.grid(row=0, column=1, rowspan=3, sticky="ns")
         self.side_panel_resize_grip.bind("<Button-1>", self._on_side_panel_resize_down)
         self.side_panel_resize_grip.bind("<B1-Motion>", self._on_side_panel_resize_drag)
@@ -1930,7 +1984,9 @@ class HarnessDrawingStudio(tk.Tk):
         self._make_mode_button(top, "draw_dimension", "Maatlijn", 0, 5, padx=2)
         self._make_mode_button(top, "place_connector", "Connector", 0, 6, padx=2)
         self._make_mode_button(top, "draw_table", "Tabel", 0, 7, padx=2)
-        ttk.Button(top, text="Fit", style="Tool.TButton", command=self.fit_page_to_view).grid(row=0, column=8, padx=(12, 2))
+        fit_btn = ttk.Button(top, text="Fit", style="Tool.TButton", command=self.fit_page_to_view)
+        fit_btn.grid(row=0, column=8, padx=(12, 2))
+        attach_tooltip(fit_btn, "Blad passend in beeld (zoom-to-fit)")
         ttk.Button(top, text="Zoom -", style="Tool.TButton", command=lambda: self.zoom_by(1 / 1.15)).grid(row=0, column=9, padx=2)
         ttk.Button(top, text="Zoom +", style="Tool.TButton", command=lambda: self.zoom_by(1.15)).grid(row=0, column=10, padx=2)
         ttk.Label(top, textvariable=self.mode_var, style="Status.TLabel").grid(row=0, column=11, sticky="w", padx=(10, 0))
@@ -1959,7 +2015,7 @@ class HarnessDrawingStudio(tk.Tk):
         canvas_wrap.grid(row=1, column=2, sticky="nsew")
         canvas_wrap.columnconfigure(0, weight=1)
         canvas_wrap.rowconfigure(0, weight=1)
-        self.canvas = tk.Canvas(canvas_wrap, background="#e9eef5", highlightthickness=0)
+        self.canvas = tk.Canvas(canvas_wrap, background=ui_theme.color(self._app_theme, "canvas_bg"), highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky="nsew")
 
         hint = ttk.Label(
@@ -2002,6 +2058,16 @@ class HarnessDrawingStudio(tk.Tk):
         panel_menu = tk.Menu(parent_menu, tearoff=0)
         self._populate_panel_menu(panel_menu)
         parent_menu.add_cascade(label=label, menu=panel_menu)
+
+    def _add_theme_menu(self, parent_menu: tk.Menu, label: str = "Thema"):
+        theme_menu = tk.Menu(parent_menu, tearoff=0)
+        theme_menu.add_radiobutton(
+            label="Licht", value="light", variable=self.app_theme_var, command=lambda: self.set_app_theme("light")
+        )
+        theme_menu.add_radiobutton(
+            label="Donker", value="dark", variable=self.app_theme_var, command=lambda: self.set_app_theme("dark")
+        )
+        parent_menu.add_cascade(label=label, menu=theme_menu)
 
     def _add_ui_scale_menu(self, parent_menu: tk.Menu, label: str = "UI schaal"):
         ui_scale_menu = tk.Menu(parent_menu, tearoff=0)
@@ -2103,6 +2169,7 @@ class HarnessDrawingStudio(tk.Tk):
         view_menu.add_checkbutton(label="Grid snap", variable=self.snap_grid_enabled_var, command=self._on_snap_settings_changed)
         view_menu.add_checkbutton(label="Endpoint snap", variable=self.snap_endpoint_enabled_var, command=self._on_snap_settings_changed)
         view_menu.add_separator()
+        self._add_theme_menu(view_menu)
         self._add_ui_scale_menu(view_menu)
         self._add_panel_menu(view_menu)
         menubar.add_cascade(label="Beeld", menu=view_menu)

@@ -53,6 +53,7 @@ Interactieve tekenapp voor kabelboom-werkbladen.
 - `Muiswiel`: zoom
 - `Middenmuis + slepen`: pan
 - `Beeld > UI schaal`: interface groter/kleiner zetten
+- `Beeld > Thema`: schakel tussen licht en donker (Windows 11-stijl via sv-ttk)
 - `SHIFT` tijdens draad tekenen: volgende segment wordt exact horizontaal of verticaal
 - `Ctrl+Z` / `Ctrl+Y`: undo / redo
 - `Ctrl+S`: opslaan
@@ -91,7 +92,10 @@ Gebruik Python 3.10 of nieuwer. Installeer de afhankelijkheden:
 python -m pip install -r requirements.txt
 ```
 
-`Pillow` is nodig voor afbeeldingimport en PNG/PDF-export. De basisfuncties blijven grotendeels werken zonder extra pakketten.
+`Pillow` is nodig voor afbeeldingimport en PNG/PDF-export. `sv-ttk` levert het
+moderne licht/donker-thema (Windows 11-stijl); ontbreekt het pakket, dan valt de
+app terug op het standaard ttk-thema. De basisfuncties blijven grotendeels werken
+zonder extra pakketten.
 
 Tests draaien:
 
