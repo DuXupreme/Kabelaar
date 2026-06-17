@@ -11,6 +11,8 @@ Interactieve tekenapp voor kabelboom-werkbladen.
   - Nieuwe ID's en interne referenties worden automatisch hernummerd bij invoegen
   - Beheer via het paneel "Bibliotheek", het menu `Tools`, of rechtermuisknop op een selectie
 - STEP connectorbestand inladen met **3D wireframe preview**
+  - Eenheden (mm/cm/m en inch/foot) worden uit het STEP-bestand gelezen en naar mm omgerekend
+  - Cirkel-/boog-randen worden getesselleerd, zodat ronde contouren zichtbaar zijn
 - In de preview kun je het model roteren en daarna projectiezijde kiezen:
   - `Top (XY)`, `Bottom (XY)`, `Front (XZ)`, `Back (XZ)`, `Left (YZ)`, `Right (YZ)`
 - Connectoren plaatsen en verplaatsen op het blad

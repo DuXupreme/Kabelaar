@@ -33,6 +33,8 @@ from kabelboom_tekenstudio import (
     polyline_point_count,
     polyline_segment_count,
     parse_step_geometry,
+    parse_step_length_scale,
+    circle_arc_points_3d,
     project_step_geometry,
     safe_name,
     try_float,
@@ -463,6 +465,73 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
         self.assertGreaterEqual(len(polylines[0]), 2)
         self.assertAlmostEqual(width, 20.0)
         self.assertAlmostEqual(height, 10.0)
+
+    def test_step_length_scale_detects_si_and_inch_units(self):
+        millimetre = "#10=( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );"
+        metre = "#10=( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );"
+        inch = (
+            "#10=( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );\n"
+            "#12=LENGTH_MEASURE_WITH_UNIT(LENGTH_MEASURE(25.4),#10);\n"
+            "#13=( CONVERSION_BASED_UNIT('INCH',#12) NAMED_UNIT(#11) LENGTH_UNIT() );"
+        )
+        self.assertAlmostEqual(parse_step_length_scale(millimetre), 1.0)
+        self.assertAlmostEqual(parse_step_length_scale(metre), 1000.0)
+        self.assertAlmostEqual(parse_step_length_scale(inch), 25.4)
+        self.assertAlmostEqual(parse_step_length_scale("geen eenheid hier"), 1.0)
+
+    def test_step_geometry_applies_unit_scale_to_coordinates(self):
+        step_text = """
+#10=( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT($,.METRE.) );
+#1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+#2 = CARTESIAN_POINT('', (0.02, 0.01, 0.0));
+#3 = VERTEX_POINT('', #1);
+#4 = VERTEX_POINT('', #2);
+#5 = EDGE_CURVE('', #3, #4, #99, .T.);
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            step_path = Path(tmp) / "metre.step"
+            step_path.write_text(step_text, encoding="utf-8")
+            geometry = parse_step_geometry(step_path)
+
+        # 0.02 m / 0.01 m -> 20 mm / 10 mm
+        _polylines, width, height = project_step_geometry(geometry, "Top (XY)")
+        self.assertAlmostEqual(width, 20.0)
+        self.assertAlmostEqual(height, 10.0)
+
+    def test_step_circle_edge_is_tessellated_on_radius(self):
+        step_text = """
+#10=( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );
+#1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+#2 = DIRECTION('', (0.0, 0.0, 1.0));
+#3 = DIRECTION('', (1.0, 0.0, 0.0));
+#4 = AXIS2_PLACEMENT_3D('', #1, #2, #3);
+#5 = CIRCLE('', #4, 10.0);
+#6 = CARTESIAN_POINT('', (10.0, 0.0, 0.0));
+#7 = CARTESIAN_POINT('', (0.0, 10.0, 0.0));
+#8 = VERTEX_POINT('', #6);
+#9 = VERTEX_POINT('', #7);
+#20 = EDGE_CURVE('', #8, #9, #5, .T.);
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            step_path = Path(tmp) / "arc.step"
+            step_path.write_text(step_text, encoding="utf-8")
+            geometry = parse_step_geometry(step_path)
+
+        unique_points = {pt for line in geometry.polylines for pt in line}
+        # Een rechte koorde zou maar 2 punten geven; een boog levert er meer.
+        self.assertGreater(len(unique_points), 3)
+        # Alle punten liggen op de cirkel met straal 10 rond de oorsprong.
+        for x, y, z in unique_points:
+            self.assertAlmostEqual(math.hypot(x, y), 10.0, places=4)
+            self.assertAlmostEqual(z, 0.0, places=6)
+
+    def test_circle_arc_points_close_full_circle_when_endpoints_coincide(self):
+        pts = circle_arc_points_3d(
+            (0.0, 0.0, 0.0), (0.0, 0.0, 1.0), (1.0, 0.0, 0.0), 5.0, (5.0, 0.0, 0.0), (5.0, 0.0, 0.0)
+        )
+        self.assertGreater(len(pts), 8)
+        for x, y, _z in pts:
+            self.assertAlmostEqual(math.hypot(x, y), 5.0, places=6)
 
 
 class ProjectIoTest(unittest.TestCase):

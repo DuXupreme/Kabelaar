@@ -30,18 +30,23 @@ volgen ttk-thema's niet automatisch — die moeten expliciet uit `theme.py` gevo
 
 ---
 
-## Batch 2 — STEP-import correctheid 🔴
+## Batch 2 — STEP-import correctheid 🔴 ✅ GEDAAN (2.1–2.3)
 
 **Doel:** geïmporteerde connectors komen op juiste schaal en met hun rondingen binnen.
 
-| # | Taak | Bestand(en) | Klaar als… |
-|---|------|-------------|------------|
-| 2.1 | Unit-context lezen (`SI_UNIT` / `CONVERSION_BASED_UNIT`) en alles omrekenen naar mm | `parse_step_geometry` (~regel 691) | inch/m-bestand komt op ware grootte binnen |
-| 2.2 | `CIRCLE`/arc-edges tesselleren naar korte segmenten i.p.v. negeren/koorde | idem | ronde connectorranden zijn zichtbaar |
-| 2.3 | Unit-test met een mini-STEP in inch + een STEP met een arc | `tests/test_kabelboom_core.py` (naast `test_step_geometry_*`) | tests groen |
-| 2.4 | (optioneel) DXF-import als simpeler alternatief voor 2D-footprints | nieuw `dxf_import.py` + knop | DXF-outline plaatst als symbool |
+| # | Taak | Bestand(en) | Klaar als… | Status |
+|---|------|-------------|------------|--------|
+| 2.1 | Unit-context lezen (`SI_UNIT` / `CONVERSION_BASED_UNIT`) en alles omrekenen naar mm | `parse_step_length_scale` + `parse_step_geometry` | inch/m-bestand komt op ware grootte binnen | ✅ |
+| 2.2 | `CIRCLE`/arc-edges tesselleren naar korte segmenten i.p.v. negeren/koorde | `circle_arc_points_3d` + EDGE_CURVE-lus | ronde connectorranden zijn zichtbaar | ✅ |
+| 2.3 | Unit-test met een mini-STEP in inch + een STEP met een arc | `tests/test_kabelboom_core.py` | tests groen (29/29) | ✅ |
+| 2.4 | (optioneel) DXF-import als simpeler alternatief voor 2D-footprints | nieuw `dxf_import.py` + knop | DXF-outline plaatst als symbool | ⏳ open |
 
-**Risico:** laag-midden. Doe 2.1 los committen — het is een afgebakende bugfix met weinig regels.
+> Uitgevoerd: `parse_step_length_scale` herkent SI-prefixen (m/cm/mm/…) en
+> `CONVERSION_BASED_UNIT` (inch/foot) en schaalt alle coördinaten + cirkelstralen
+> naar mm. `circle_arc_points_3d` bemonstert cirkel-edges (volledige cirkel bij
+> samenvallende eindpunten, anders de korte boog). 4 nieuwe tests.
+
+**Restant:** 2.4 (DXF-import) blijft optioneel openstaan.
 
 ---
 
