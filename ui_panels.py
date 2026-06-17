@@ -642,6 +642,43 @@ class UIBuilderMixin:
         self.prop_wire_move_scope_var.trace_add("write", lambda *_: self._on_wire_move_scope_changed())
         self.prop_wire_endpoint_drag_scope_var.trace_add("write", lambda *_: self._on_wire_endpoint_drag_scope_changed())
 
+        # --- Eigenschappen gegroepeerd in LabelFrame-blokken (geen harde rijnummers
+        # meer in de UI). Velden houden intern een stabiele veld-id; blokken
+        # klappen automatisch in als er voor de huidige selectie niets in staat. ---
+        self._field_widgets = {}
+        self._field_block = {}
+        self._property_blocks = []
+        self._property_block_rows = {}
+
+        def make_block(title):
+            frame = ttk.LabelFrame(props, text=title, padding=(8, 4))
+            frame.columnconfigure(1, weight=1)
+            frame.grid(row=len(self._property_blocks) + 1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+            self._property_blocks.append(frame)
+            self._property_block_rows[frame] = 0
+            return frame
+
+        def add_field(block, field_id, label_text, widget, label_widget=None):
+            r = self._property_block_rows[block]
+            widgets = []
+            if label_text is not None:
+                lbl = label_widget if label_widget is not None else ttk.Label(block, text=label_text)
+                lbl.grid(in_=block, row=r, column=0, sticky="w", pady=1)
+                widgets.append(lbl)
+            widget.grid(in_=block, row=r, column=1, sticky="ew", padx=(4, 0), pady=1)
+            widgets.append(widget)
+            self._property_block_rows[block] = r + 1
+            self._field_widgets[field_id] = widgets
+            self._field_block[field_id] = block
+
+        def add_span(block, field_id, widget):
+            r = self._property_block_rows[block]
+            widget.grid(in_=block, row=r, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+            self._property_block_rows[block] = r + 1
+            self._field_widgets[field_id] = [widget]
+            self._field_block[field_id] = block
+
+        # Objectkop (altijd zichtbaar): naam-label of bewerkbaar connector-ID-veld.
         ttk.Label(props, text="Object").grid(row=0, column=0, sticky="w")
         self.prop_target_lbl = ttk.Label(props, textvariable=self.prop_target_var)
         self.prop_target_lbl.grid(row=0, column=1, sticky="w")
@@ -650,9 +687,10 @@ class UIBuilderMixin:
         self.prop_connector_id_entry.bind("<Return>", lambda _e: self._rename_selected_connector())
         self.prop_connector_id_entry.bind("<FocusOut>", lambda _e: self._rename_selected_connector())
         self.prop_connector_id_entry.grid_remove()
-        ttk.Label(props, text="Kleur").grid(row=1, column=0, sticky="w")
-        color_row = ttk.Frame(props)
-        color_row.grid(row=1, column=1, sticky="ew", padx=(4, 0))
+
+        # Blok: Stijl
+        style_block = make_block("Stijl")
+        color_row = ttk.Frame(style_block)
         color_row.columnconfigure(0, weight=1)
         self.prop_color_entry = ttk.Entry(color_row, textvariable=self.prop_color_var)
         self.prop_color_entry.grid(row=0, column=0, sticky="ew")
@@ -660,28 +698,8 @@ class UIBuilderMixin:
         self.prop_color_pick_btn.grid(row=0, column=1, padx=(4, 0))
         self.prop_color_preview = tk.Label(color_row, width=2, relief="sunken", bg="#1f4e79")
         self.prop_color_preview.grid(row=0, column=2, padx=(4, 0))
-        ttk.Label(props, text="Lijndikte mm").grid(row=2, column=0, sticky="w")
-        self.prop_width_entry = ttk.Entry(props, textvariable=self.prop_width_var)
-        self.prop_width_entry.grid(row=2, column=1, sticky="ew", padx=(4, 0))
-        self.prop_text_label = ttk.Label(props, text="Tekst / label")
-        self.prop_text_label.grid(row=3, column=0, sticky="w")
-        self.prop_text_entry = ttk.Entry(props, textvariable=self.prop_text_var)
-        self.prop_text_entry.grid(row=3, column=1, sticky="ew", padx=(4, 0))
-        self.prop_scale_label = ttk.Label(props, text="Schaal")
-        self.prop_scale_label.grid(row=4, column=0, sticky="w")
-        self.prop_scale_entry = ttk.Entry(props, textvariable=self.prop_scale_var)
-        self.prop_scale_entry.grid(row=4, column=1, sticky="ew", padx=(4, 0))
-
-        ttk.Label(props, text="Draadtype").grid(row=5, column=0, sticky="w")
-        self.prop_wire_style_combo = ttk.Combobox(props, textvariable=self.prop_wire_style_var, values=WIRE_STYLE_OPTIONS, state="readonly")
-        self.prop_wire_style_combo.grid(row=5, column=1, sticky="ew", padx=(4, 0))
-        ttk.Label(props, text="Bocht mm").grid(row=6, column=0, sticky="w")
-        self.prop_curve_entry = ttk.Entry(props, textvariable=self.prop_curve_var)
-        self.prop_curve_entry.grid(row=6, column=1, sticky="ew", padx=(4, 0))
-
-        ttk.Label(props, text="Kleur B").grid(row=7, column=0, sticky="w")
-        color_b_row = ttk.Frame(props)
-        color_b_row.grid(row=7, column=1, sticky="ew", padx=(4, 0))
+        add_field(style_block, 1, "Kleur", color_row)
+        color_b_row = ttk.Frame(style_block)
         color_b_row.columnconfigure(0, weight=1)
         self.prop_color_b_entry = ttk.Entry(color_b_row, textvariable=self.prop_color_b_var)
         self.prop_color_b_entry.grid(row=0, column=0, sticky="ew")
@@ -689,108 +707,10 @@ class UIBuilderMixin:
         self.prop_color_b_pick_btn.grid(row=0, column=1, padx=(4, 0))
         self.prop_color_b_preview = tk.Label(color_b_row, width=2, relief="sunken", bg="#d7263d")
         self.prop_color_b_preview.grid(row=0, column=2, padx=(4, 0))
-
-        ttk.Label(props, text="Twist pitch mm").grid(row=8, column=0, sticky="w")
-        self.prop_twist_pitch_entry = ttk.Entry(props, textvariable=self.prop_twist_pitch_var)
-        self.prop_twist_pitch_entry.grid(row=8, column=1, sticky="ew", padx=(4, 0))
-        ttk.Label(props, text="Pair gap mm").grid(row=9, column=0, sticky="w")
-        self.prop_pair_gap_entry = ttk.Entry(props, textvariable=self.prop_pair_gap_var)
-        self.prop_pair_gap_entry.grid(row=9, column=1, sticky="ew", padx=(4, 0))
-
-        ttk.Label(props, text="Signaal").grid(row=10, column=0, sticky="w")
-        self.prop_signal_entry = ttk.Entry(props, textvariable=self.prop_signal_var)
-        self.prop_signal_entry.grid(row=10, column=1, sticky="ew", padx=(4, 0))
-        ttk.Label(props, text="Van conn/pin").grid(row=11, column=0, sticky="w")
-        from_row = ttk.Frame(props)
-        from_row.grid(row=11, column=1, sticky="ew", padx=(4, 0))
-        from_row.columnconfigure(0, weight=1)
-        from_row.columnconfigure(1, weight=1)
-        self.prop_from_connector_entry = ttk.Entry(from_row, textvariable=self.prop_from_connector_var)
-        self.prop_from_connector_entry.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-        self.prop_from_pin_entry = ttk.Entry(from_row, textvariable=self.prop_from_pin_var)
-        self.prop_from_pin_entry.grid(row=0, column=1, sticky="ew", padx=(3, 0))
-        ttk.Label(props, text="Naar conn/pin").grid(row=12, column=0, sticky="w")
-        to_row = ttk.Frame(props)
-        to_row.grid(row=12, column=1, sticky="ew", padx=(4, 0))
-        to_row.columnconfigure(0, weight=1)
-        to_row.columnconfigure(1, weight=1)
-        self.prop_to_connector_entry = ttk.Entry(to_row, textvariable=self.prop_to_connector_var)
-        self.prop_to_connector_entry.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-        self.prop_to_pin_entry = ttk.Entry(to_row, textvariable=self.prop_to_pin_var)
-        self.prop_to_pin_entry.grid(row=0, column=1, sticky="ew", padx=(3, 0))
-        ttk.Label(props, text="mm2 / lengte").grid(row=13, column=0, sticky="w")
-        wire_dims_row = ttk.Frame(props)
-        wire_dims_row.grid(row=13, column=1, sticky="ew", padx=(4, 0))
-        wire_dims_row.columnconfigure(0, weight=1)
-        wire_dims_row.columnconfigure(1, weight=1)
-        self.prop_cross_section_entry = ttk.Entry(wire_dims_row, textvariable=self.prop_cross_section_var)
-        self.prop_cross_section_entry.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-        self.prop_length_entry = ttk.Entry(wire_dims_row, textvariable=self.prop_length_var)
-        self.prop_length_entry.grid(row=0, column=1, sticky="ew", padx=(3, 0))
-        ttk.Label(props, text="Net").grid(row=14, column=0, sticky="w")
-        self.prop_net_entry = ttk.Entry(props, textvariable=self.prop_net_var)
-        self.prop_net_entry.grid(row=14, column=1, sticky="ew", padx=(4, 0))
-        self.prop_shielded_check = ttk.Checkbutton(props, text="Shielded", variable=self.prop_shielded_var)
-        self.prop_shielded_check.grid(row=15, column=1, sticky="w", padx=(4, 0))
-
-        ttk.Label(props, text="Connector part").grid(row=16, column=0, sticky="w")
-        self.prop_connector_part_entry = ttk.Entry(props, textvariable=self.prop_connector_part_var)
-        self.prop_connector_part_entry.grid(row=16, column=1, sticky="ew", padx=(4, 0))
-        ttk.Label(props, text="Connector pins").grid(row=17, column=0, sticky="w")
-        self.prop_connector_pin_count_entry = ttk.Entry(props, textvariable=self.prop_connector_pin_count_var)
-        self.prop_connector_pin_count_entry.grid(row=17, column=1, sticky="ew", padx=(4, 0))
-        ttk.Label(props, text="Pinlabels").grid(row=18, column=0, sticky="w")
-        self.prop_connector_pin_labels_entry = ttk.Entry(props, textvariable=self.prop_connector_pin_labels_var)
-        self.prop_connector_pin_labels_entry.grid(row=18, column=1, sticky="ew", padx=(4, 0))
-        self.prop_connector_label_offset_label = ttk.Label(props, text="Naam offset mm")
-        self.prop_connector_label_offset_label.grid(row=28, column=0, sticky="w")
-        label_offset_row = ttk.Frame(props)
-        label_offset_row.grid(row=28, column=1, sticky="ew", padx=(4, 0))
-        label_offset_row.columnconfigure(0, weight=1)
-        label_offset_row.columnconfigure(1, weight=1)
-        self.prop_connector_label_dx_entry = ttk.Entry(label_offset_row, textvariable=self.prop_connector_label_dx_var)
-        self.prop_connector_label_dx_entry.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-        self.prop_connector_label_dy_entry = ttk.Entry(label_offset_row, textvariable=self.prop_connector_label_dy_var)
-        self.prop_connector_label_dy_entry.grid(row=0, column=1, sticky="ew", padx=(3, 0))
-
-        ttk.Label(props, text="Verplaats draad").grid(row=19, column=0, sticky="w")
-        self.prop_wire_move_scope_combo = ttk.Combobox(
-            props, textvariable=self.prop_wire_move_scope_var, values=WIRE_MOVE_SCOPE_OPTIONS, state="readonly"
-        )
-        self.prop_wire_move_scope_combo.grid(row=19, column=1, sticky="ew", padx=(4, 0))
-        ttk.Label(props, text="Sleep eindpunt").grid(row=20, column=0, sticky="w")
-        self.prop_wire_endpoint_drag_scope_combo = ttk.Combobox(
-            props,
-            textvariable=self.prop_wire_endpoint_drag_scope_var,
-            values=WIRE_ENDPOINT_DRAG_SCOPE_OPTIONS,
-            state="readonly",
-        )
-        self.prop_wire_endpoint_drag_scope_combo.grid(row=20, column=1, sticky="ew", padx=(4, 0))
-
-        ttk.Label(props, text="Tekstgrootte pt").grid(row=23, column=0, sticky="w")
-        self.prop_leader_text_size_entry = ttk.Entry(props, textvariable=self.prop_leader_text_size_var)
-        self.prop_leader_text_size_entry.grid(row=23, column=1, sticky="ew", padx=(4, 0))
-        self.prop_leader_text_box_check = ttk.Checkbutton(props, text="Tekstkader tonen", variable=self.prop_leader_text_box_var)
-        self.prop_leader_text_box_check.grid(row=24, column=1, sticky="w", padx=(4, 0))
-
-        self.prop_dim_orientation_label = ttk.Label(props, text="Maatrichting")
-        self.prop_dim_orientation_label.grid(row=25, column=0, sticky="w")
-        self.prop_dim_orientation_combo = ttk.Combobox(
-            props, textvariable=self.prop_dim_orientation_var, values=DIMENSION_ORIENTATION_OPTIONS, state="readonly"
-        )
-        self.prop_dim_orientation_combo.grid(row=25, column=1, sticky="ew", padx=(4, 0))
-        self.prop_dim_orientation_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_dimension_quick_edit())
-        self.prop_dim_offset_label = ttk.Label(props, text="Offset mm")
-        self.prop_dim_offset_label.grid(row=26, column=0, sticky="w")
-        self.prop_dim_offset_entry = ttk.Entry(props, textvariable=self.prop_dim_offset_var)
-        self.prop_dim_offset_entry.grid(row=26, column=1, sticky="ew", padx=(4, 0))
-        self.prop_dim_tolerance_label = ttk.Label(props, text="Tolerantie")
-        self.prop_dim_tolerance_label.grid(row=27, column=0, sticky="w")
-        self.prop_dim_tolerance_entry = ttk.Entry(props, textvariable=self.prop_dim_tolerance_var)
-        self.prop_dim_tolerance_entry.grid(row=27, column=1, sticky="ew", padx=(4, 0))
-
-        palette_row = ttk.Frame(props)
-        palette_row.grid(row=21, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        add_field(style_block, 7, "Kleur B", color_b_row)
+        self.prop_width_entry = ttk.Entry(style_block, textvariable=self.prop_width_var)
+        add_field(style_block, 2, "Lijndikte mm", self.prop_width_entry)
+        palette_row = ttk.Frame(style_block)
         palette_colors = ui_theme.DRAWING_PALETTE
         self.prop_palette_buttons: List[tk.Button] = []
         for idx, color in enumerate(palette_colors):
@@ -804,9 +724,112 @@ class UIBuilderMixin:
             )
             btn.grid(row=0, column=idx, padx=1)
             self.prop_palette_buttons.append(btn)
+        add_span(style_block, 21, palette_row)
 
+        # Blok: Tekst
+        text_block = make_block("Tekst")
+        self.prop_text_label = ttk.Label(text_block, text="Tekst / label")
+        self.prop_text_entry = ttk.Entry(text_block, textvariable=self.prop_text_var)
+        add_field(text_block, 3, "Tekst / label", self.prop_text_entry, label_widget=self.prop_text_label)
+        self.prop_leader_text_size_entry = ttk.Entry(text_block, textvariable=self.prop_leader_text_size_var)
+        add_field(text_block, 23, "Tekstgrootte pt", self.prop_leader_text_size_entry)
+        self.prop_leader_text_box_check = ttk.Checkbutton(text_block, text="Tekstkader tonen", variable=self.prop_leader_text_box_var)
+        add_field(text_block, 24, None, self.prop_leader_text_box_check)
+
+        # Blok: Geometrie
+        geom_block = make_block("Geometrie")
+        self.prop_scale_label = ttk.Label(geom_block, text="Schaal")
+        self.prop_scale_entry = ttk.Entry(geom_block, textvariable=self.prop_scale_var)
+        add_field(geom_block, 4, "Schaal", self.prop_scale_entry, label_widget=self.prop_scale_label)
+
+        # Blok: Draad
+        wire_block = make_block("Draad")
+        self.prop_wire_style_combo = ttk.Combobox(wire_block, textvariable=self.prop_wire_style_var, values=WIRE_STYLE_OPTIONS, state="readonly")
+        add_field(wire_block, 5, "Draadtype", self.prop_wire_style_combo)
+        self.prop_curve_entry = ttk.Entry(wire_block, textvariable=self.prop_curve_var)
+        add_field(wire_block, 6, "Bocht mm", self.prop_curve_entry)
+        self.prop_twist_pitch_entry = ttk.Entry(wire_block, textvariable=self.prop_twist_pitch_var)
+        add_field(wire_block, 8, "Twist pitch mm", self.prop_twist_pitch_entry)
+        self.prop_pair_gap_entry = ttk.Entry(wire_block, textvariable=self.prop_pair_gap_var)
+        add_field(wire_block, 9, "Pair gap mm", self.prop_pair_gap_entry)
+        self.prop_wire_move_scope_combo = ttk.Combobox(
+            wire_block, textvariable=self.prop_wire_move_scope_var, values=WIRE_MOVE_SCOPE_OPTIONS, state="readonly"
+        )
+        add_field(wire_block, 19, "Verplaats draad", self.prop_wire_move_scope_combo)
+        self.prop_wire_endpoint_drag_scope_combo = ttk.Combobox(
+            wire_block, textvariable=self.prop_wire_endpoint_drag_scope_var, values=WIRE_ENDPOINT_DRAG_SCOPE_OPTIONS, state="readonly"
+        )
+        add_field(wire_block, 20, "Sleep eindpunt", self.prop_wire_endpoint_drag_scope_combo)
+
+        # Blok: Elektrisch
+        elec_block = make_block("Elektrisch")
+        self.prop_signal_entry = ttk.Entry(elec_block, textvariable=self.prop_signal_var)
+        add_field(elec_block, 10, "Signaal", self.prop_signal_entry)
+        from_row = ttk.Frame(elec_block)
+        from_row.columnconfigure(0, weight=1)
+        from_row.columnconfigure(1, weight=1)
+        self.prop_from_connector_entry = ttk.Entry(from_row, textvariable=self.prop_from_connector_var)
+        self.prop_from_connector_entry.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.prop_from_pin_entry = ttk.Entry(from_row, textvariable=self.prop_from_pin_var)
+        self.prop_from_pin_entry.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        add_field(elec_block, 11, "Van conn/pin", from_row)
+        to_row = ttk.Frame(elec_block)
+        to_row.columnconfigure(0, weight=1)
+        to_row.columnconfigure(1, weight=1)
+        self.prop_to_connector_entry = ttk.Entry(to_row, textvariable=self.prop_to_connector_var)
+        self.prop_to_connector_entry.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.prop_to_pin_entry = ttk.Entry(to_row, textvariable=self.prop_to_pin_var)
+        self.prop_to_pin_entry.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        add_field(elec_block, 12, "Naar conn/pin", to_row)
+        wire_dims_row = ttk.Frame(elec_block)
+        wire_dims_row.columnconfigure(0, weight=1)
+        wire_dims_row.columnconfigure(1, weight=1)
+        self.prop_cross_section_entry = ttk.Entry(wire_dims_row, textvariable=self.prop_cross_section_var)
+        self.prop_cross_section_entry.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.prop_length_entry = ttk.Entry(wire_dims_row, textvariable=self.prop_length_var)
+        self.prop_length_entry.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        add_field(elec_block, 13, "mm2 / lengte", wire_dims_row)
+        self.prop_net_entry = ttk.Entry(elec_block, textvariable=self.prop_net_var)
+        add_field(elec_block, 14, "Net", self.prop_net_entry)
+        self.prop_shielded_check = ttk.Checkbutton(elec_block, text="Shielded", variable=self.prop_shielded_var)
+        add_field(elec_block, 15, None, self.prop_shielded_check)
+
+        # Blok: Connector
+        conn_block = make_block("Connector")
+        self.prop_connector_part_entry = ttk.Entry(conn_block, textvariable=self.prop_connector_part_var)
+        add_field(conn_block, 16, "Connector part", self.prop_connector_part_entry)
+        self.prop_connector_pin_count_entry = ttk.Entry(conn_block, textvariable=self.prop_connector_pin_count_var)
+        add_field(conn_block, 17, "Connector pins", self.prop_connector_pin_count_entry)
+        self.prop_connector_pin_labels_entry = ttk.Entry(conn_block, textvariable=self.prop_connector_pin_labels_var)
+        add_field(conn_block, 18, "Pinlabels", self.prop_connector_pin_labels_entry)
+        self.prop_connector_label_offset_label = ttk.Label(conn_block, text="Naam offset mm")
+        label_offset_row = ttk.Frame(conn_block)
+        label_offset_row.columnconfigure(0, weight=1)
+        label_offset_row.columnconfigure(1, weight=1)
+        self.prop_connector_label_dx_entry = ttk.Entry(label_offset_row, textvariable=self.prop_connector_label_dx_var)
+        self.prop_connector_label_dx_entry.grid(row=0, column=0, sticky="ew", padx=(0, 3))
+        self.prop_connector_label_dy_entry = ttk.Entry(label_offset_row, textvariable=self.prop_connector_label_dy_var)
+        self.prop_connector_label_dy_entry.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        add_field(conn_block, 28, "Naam offset mm", label_offset_row, label_widget=self.prop_connector_label_offset_label)
+
+        # Blok: Maatlijn
+        dim_block = make_block("Maatlijn")
+        self.prop_dim_orientation_label = ttk.Label(dim_block, text="Maatrichting")
+        self.prop_dim_orientation_combo = ttk.Combobox(
+            dim_block, textvariable=self.prop_dim_orientation_var, values=DIMENSION_ORIENTATION_OPTIONS, state="readonly"
+        )
+        self.prop_dim_orientation_combo.bind("<<ComboboxSelected>>", lambda _e: self._on_dimension_quick_edit())
+        add_field(dim_block, 25, "Maatrichting", self.prop_dim_orientation_combo, label_widget=self.prop_dim_orientation_label)
+        self.prop_dim_offset_label = ttk.Label(dim_block, text="Offset mm")
+        self.prop_dim_offset_entry = ttk.Entry(dim_block, textvariable=self.prop_dim_offset_var)
+        add_field(dim_block, 26, "Offset mm", self.prop_dim_offset_entry, label_widget=self.prop_dim_offset_label)
+        self.prop_dim_tolerance_label = ttk.Label(dim_block, text="Tolerantie")
+        self.prop_dim_tolerance_entry = ttk.Entry(dim_block, textvariable=self.prop_dim_tolerance_var)
+        add_field(dim_block, 27, "Tolerantie", self.prop_dim_tolerance_entry, label_widget=self.prop_dim_tolerance_label)
+
+        # Acties (altijd zichtbaar onderaan).
         actions = ttk.Frame(props)
-        actions.grid(row=22, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        actions.grid(row=len(self._property_blocks) + 2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         actions.columnconfigure(0, weight=1)
         actions.columnconfigure(1, weight=1)
         self.prop_apply_btn = ttk.Button(actions, text="Toepassen op selectie", command=self.apply_properties_from_panel)

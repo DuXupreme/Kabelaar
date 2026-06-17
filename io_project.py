@@ -8,9 +8,12 @@ lossen op tegen die instantie. Bevat geen state of __init__.
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import asdict
 from pathlib import Path
 from typing import Optional
+
+LOGGER = logging.getLogger("kabelboom.io")
 
 from project_io import write_text_atomic
 from geometry import clamp
@@ -237,6 +240,7 @@ class ProjectIOMixin:
                 )
                 self.symbols[sym.name] = sym
             except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
         self.connectors = []
@@ -264,6 +268,7 @@ class ProjectIOMixin:
                     )
                 )
             except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
         self.wires = []
@@ -283,11 +288,11 @@ class ProjectIOMixin:
                 end_handle_raw = raw.get("end_handle_offset_mm", (0.0, 0.0))
                 try:
                     start_handle_offset = (float(start_handle_raw[0]), float(start_handle_raw[1]))
-                except Exception:
+                except (TypeError, ValueError, IndexError):
                     start_handle_offset = (0.0, 0.0)
                 try:
                     end_handle_offset = (float(end_handle_raw[0]), float(end_handle_raw[1]))
-                except Exception:
+                except (TypeError, ValueError, IndexError):
                     end_handle_offset = (0.0, 0.0)
                 twist_pitch = float(raw.get("twist_pitch_mm", 10.0))
                 pair_gap = float(raw.get("pair_gap_mm", 2.8))
@@ -368,6 +373,7 @@ class ProjectIOMixin:
                             )
                         )
             except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
         self.leaders = []
@@ -393,6 +399,7 @@ class ProjectIOMixin:
                     )
                 )
             except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
         self.dimensions = []
@@ -415,6 +422,7 @@ class ProjectIOMixin:
                     )
                 )
             except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
         self.text_notes = []
@@ -431,6 +439,7 @@ class ProjectIOMixin:
                     )
                 )
             except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
         self.image_notes = []
@@ -450,6 +459,7 @@ class ProjectIOMixin:
                     )
                 )
             except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
         self.tables = []
@@ -481,6 +491,7 @@ class ProjectIOMixin:
                 t.cells = [row[: t.cols] + ([""] * max(0, t.cols - len(row))) for row in t.cells[: t.rows]]
                 self.tables.append(t)
             except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
         self._merge_library_symbols_into_session()

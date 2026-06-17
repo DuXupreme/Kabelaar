@@ -2469,35 +2469,35 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             self.property_hint_var.set(text)
 
     def _capture_property_row_widgets(self):
-        if not hasattr(self, "properties_frame"):
-            return
-        rows: Dict[int, List[object]] = {}
-        for widget in self.properties_frame.winfo_children():
-            try:
-                row = int(widget.grid_info().get("row", -1))
-            except (TypeError, ValueError, tk.TclError):
-                row = -1
-            if row >= 0:
-                rows.setdefault(row, []).append(widget)
-        self._property_row_widgets = rows
+        # Veld-widgets worden tijdens de opbouw geregistreerd in _field_widgets.
+        # Deze methode blijft als no-op bestaan voor compatibiliteit met de bouwflow.
+        if not hasattr(self, "_field_widgets"):
+            self._field_widgets = {}
+            self._field_block = {}
+            self._property_blocks = []
 
     def _property_widgets_for_row(self, row: int) -> List[object]:
-        widgets = getattr(self, "_property_row_widgets", {}).get(row)
-        if widgets is not None:
-            return widgets
-        return list(self.properties_frame.grid_slaves(row=row))
+        return list(getattr(self, "_field_widgets", {}).get(row, []))
 
     def _set_visible_property_rows(self, rows: set[int]):
-        if not hasattr(self, "properties_frame"):
+        if not hasattr(self, "_field_widgets"):
             return
         visible_rows = set(rows) | {0, 22}
         self._property_visible_rows = set(visible_rows)
-        for row in range(0, 29):
-            for widget in self._property_widgets_for_row(row):
-                if row in visible_rows:
+        for field_id, widgets in self._field_widgets.items():
+            show = field_id in visible_rows
+            for widget in widgets:
+                if show:
                     widget.grid()
                 else:
                     widget.grid_remove()
+        # Klap een heel blok in als er voor deze selectie geen enkel veld in staat.
+        for block in getattr(self, "_property_blocks", []):
+            block_field_ids = [fid for fid, blk in self._field_block.items() if blk is block]
+            if any(fid in visible_rows for fid in block_field_ids):
+                block.grid()
+            else:
+                block.grid_remove()
         # Standaard: toon de objectnaam als label, verberg het hernoem-veld.
         # De connector-tak zet dit om wanneer precies één connector geselecteerd is.
         if getattr(self, "prop_connector_id_entry", None) is not None:

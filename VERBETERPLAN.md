@@ -87,9 +87,15 @@ de god-class is nu een dunne controller met de logica verdeeld over zes modules.
 
 ---
 
-## Batch 4 — UX-polish in de panelen 🟠
+## Batch 4 — UX-polish in de panelen 🟠 ✅ GEDAAN
 
 **Doel:** het eigenschappenpaneel wordt leesbaar en robuust; betere oriëntatie in de app.
+
+> Uitgevoerd: eigenschappen gegroepeerd in `ttk.LabelFrame`-blokken (Stijl, Tekst,
+> Geometrie, Draad, Elektrisch, Connector, Maatlijn) die per selectie automatisch
+> in-/uitklappen; intern stabiele veld-id's i.p.v. harde grid-rijen. Echte statusbalk
+> onderaan met live status + vaste X/Y mm-readout. Sneltoetsen-dialoog (Help-menu en F1).
+> Onboarding: lege-staat-overlay op het canvas + "Nieuw uit sjabloon" (bladformaatkeuze).
 
 | # | Taak | Bestand(en) | Klaar als… |
 |---|------|-------------|------------|
@@ -103,9 +109,17 @@ de god-class is nu een dunne controller met de logica verdeeld over zes modules.
 
 ---
 
-## Batch 5 — Inhoudelijke diepte: richting ECAD 🟠 / robuustheid 🟢
+## Batch 5 — Inhoudelijke diepte: richting ECAD 🟠 / robuustheid 🟢 ✅ GEDAAN (5.5 deels)
 
 **Doel:** van tekentool naar tool die connectiviteit echt begrijpt; betere diagnostiek.
+
+> Uitgevoerd: 5.1 pin-posities (`ConnectorInstance.pin_offsets_mm` + auto-layout,
+> elke pin heeft een wereldpositie, gerenderd bij selectie). 5.2 netlist geometrisch
+> afleiden (draadeinden koppelen aan dichtstbijzijnde pin; Tools-menu). 5.3 DRC uitgebreid
+> met niet-aangesloten pins + niet-standaard doorsnede-check (+ tests). 5.4 logging met
+> roterend bestand in app-data + excepthook (`logging_setup.py`). 5.5 deels: overgeslagen
+> laad-items worden nu gelogd en enkele parse-fallbacks versmald; brede catches rond
+> optionele imports/Tk-teardown bewust gelaten.
 
 | # | Taak | Bestand(en) | Klaar als… |
 |---|------|-------------|------------|
