@@ -25,5 +25,9 @@ settings.json
 blocks_library.json
 symbols_library.json
 
+# Logbestanden (op runtime aangemaakt)
+/logs/
+*.log
+
 # Claude Code tooling
 .claude/

@@ -89,6 +89,40 @@ class RenderingMixin:
         self._draw_tables()
         self._draw_text_notes()
         self._draw_temporary_geometry()
+        self._draw_empty_state_overlay()
+
+    def _project_is_empty(self) -> bool:
+        return not any((
+            self.connectors,
+            self.wires,
+            self.leaders,
+            self.dimensions,
+            self.tables,
+            self.text_notes,
+            self.image_notes,
+        ))
+
+    def _draw_empty_state_overlay(self):
+        if not self._project_is_empty():
+            return
+        cv = self.canvas
+        cw = cv.winfo_width()
+        ch = cv.winfo_height()
+        if cw <= 1 or ch <= 1:
+            return
+        cx = cw / 2.0
+        cy = ch / 2.0
+        lines = [
+            ("Leeg tekenblad", 16, "bold", "#334155"),
+            ("Importeer een STEP-connector (knop 'STEP import' links)", 11, "normal", "#64748b"),
+            ("of kies een tekenmodus in de werkbalk bovenaan.", 11, "normal", "#64748b"),
+            ("F1 toont alle sneltoetsen · Bestand ▸ Nieuw uit sjabloon…", 10, "normal", "#94a3b8"),
+        ]
+        offset = -36
+        for text, pt, weight, color in lines:
+            font = ("Segoe UI", pt, "bold") if weight == "bold" else ("Segoe UI", pt)
+            cv.create_text(cx, cy + offset, text=text, fill=color, font=font, anchor="center")
+            offset += pt + 12
 
     def _redraw_temporary_geometry_only(self):
         if not self.canvas.winfo_exists():
@@ -139,6 +173,11 @@ class RenderingMixin:
                 # Sleephandle rond het label zodat de naam los verplaatsbaar is.
                 lbx1, lby1, lbx2, lby2 = self._connector_label_canvas_bbox(c)
                 self.canvas.create_rectangle(lbx1, lby1, lbx2, lby2, outline="#f08c00", dash=(2, 2), width=1)
+                # Pin-markers met nummer/label.
+                for pin_label, wx, wy in self._connector_pin_world_points(c):
+                    ppx, ppy = self.world_to_canvas(wx, wy)
+                    self.canvas.create_oval(ppx - 3, ppy - 3, ppx + 3, ppy + 3, fill="#1d4ed8", outline="white", width=1)
+                    self.canvas.create_text(ppx + 5, ppy - 5, text=pin_label, anchor="sw", fill="#1d4ed8", font=("Segoe UI", 7))
 
     def _draw_image_notes(self):
         if not self.image_notes:

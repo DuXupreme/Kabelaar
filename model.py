@@ -116,6 +116,14 @@ class ConnectorInstance:
     pin_labels: List[str] = field(default_factory=list)
     label_dx_mm: float = 0.0
     label_dy_mm: float = -6.0
+    pin_offsets_mm: List[Tuple[float, float]] = field(default_factory=list)
+
+
+def connector_pin_label(index: int, labels: List[str]) -> str:
+    """Label voor pin op positie ``index`` (0-based): expliciet label of het 1-based nummer."""
+    if 0 <= index < len(labels) and str(labels[index]).strip():
+        return str(labels[index]).strip()
+    return str(index + 1)
 
 
 @dataclass
@@ -255,6 +263,15 @@ def wire_has_electrical_data(wire: WirePath) -> bool:
     )
 
 
+STANDARD_CROSS_SECTIONS_MM2 = (
+    0.13, 0.22, 0.25, 0.34, 0.35, 0.5, 0.75, 1.0, 1.5, 2.5, 4.0, 6.0, 10.0, 16.0, 25.0, 35.0, 50.0,
+)
+
+
+def is_standard_cross_section(value: float, tol: float = 0.02) -> bool:
+    return any(abs(value - std) <= tol for std in STANDARD_CROSS_SECTIONS_MM2)
+
+
 def wire_electrical_drc(wires: List[WirePath], connector_pin_data: Dict[str, Tuple[int, List[str]]]) -> Tuple[List[str], List[str]]:
     findings: List[str] = []
     warnings: List[str] = []
@@ -303,6 +320,10 @@ def wire_electrical_drc(wires: List[WirePath], connector_pin_data: Dict[str, Tup
 
         if wire.cross_section_mm2 <= 0:
             warnings.append(f"[WAARSCHUWING] Draad {wire.wire_id} mist doorsnede mm2.")
+        elif not is_standard_cross_section(wire.cross_section_mm2):
+            warnings.append(
+                f"[WAARSCHUWING] Draad {wire.wire_id} heeft een niet-standaard doorsnede ({wire.cross_section_mm2:g} mm2)."
+            )
         if wire.length_mm <= 0:
             warnings.append(f"[WAARSCHUWING] Draad {wire.wire_id} mist elektrische lengte.")
 
@@ -310,6 +331,15 @@ def wire_electrical_drc(wires: List[WirePath], connector_pin_data: Dict[str, Tup
         unique_ids = sorted(set(wire_ids))
         if len(unique_ids) > 1:
             warnings.append(f"[WAARSCHUWING] Pin {ref}:{pin} wordt gebruikt door meerdere draden: {', '.join(unique_ids)}.")
+
+    # Niet-aangesloten pins: elke connector-pin die door geen enkele draad gebruikt wordt.
+    used_pins = set(endpoint_usage.keys())
+    for ref, (pin_count, pin_labels) in sorted(connector_pin_data.items()):
+        ref_upper = ref.strip().upper()
+        for index in range(max(0, pin_count)):
+            pin = connector_pin_label(index, pin_labels)
+            if (ref_upper, pin) not in used_pins:
+                warnings.append(f"[WAARSCHUWING] Pin {ref}:{pin} is niet aangesloten.")
 
     return findings, warnings
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import asdict
 from pathlib import Path
+from typing import Optional
 
 from project_io import write_text_atomic
 from geometry import clamp
@@ -259,6 +260,7 @@ class ProjectIOMixin:
                         pin_labels=[str(label).strip() for label in raw.get("pin_labels", []) if str(label).strip()],
                         label_dx_mm=float(raw.get("label_dx_mm", 0.0)),
                         label_dy_mm=float(raw.get("label_dy_mm", -6.0)),
+                        pin_offsets_mm=[(float(px), float(py)) for px, py in raw.get("pin_offsets_mm", [])],
                     )
                 )
             except Exception:
@@ -489,7 +491,7 @@ class ProjectIOMixin:
         self.cancel_temporary_action()
         self.redraw()
 
-    def new_project(self):
+    def new_project(self, paper_preset: Optional[str] = None):
         if not self._confirm_discard_changes():
             return
         self.project_path = None
@@ -503,7 +505,8 @@ class ProjectIOMixin:
         self.text_notes = []
         self.image_notes = []
         self.tables = []
-        default_paper = paper_preset_dimensions(DEFAULT_PAPER_PRESET) or (420.0, 297.0)
+        chosen_paper = paper_preset_dimensions(paper_preset) if paper_preset else None
+        default_paper = chosen_paper or paper_preset_dimensions(DEFAULT_PAPER_PRESET) or (420.0, 297.0)
         self.paper_w_mm = default_paper[0]
         self.paper_h_mm = default_paper[1]
         self._sync_paper_preset_var()

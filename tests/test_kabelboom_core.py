@@ -18,7 +18,9 @@ from kabelboom_tekenstudio import (
     DimensionLine,
     Leader,
     StepGeometry3D,
+    StepSymbol,
     WirePath,
+    connector_pin_label,
     dimension_orientation_internal,
     dimension_orientation_label,
     normalize_dimension_orientation,
@@ -48,6 +50,7 @@ from kabelboom_tekenstudio import (
     wire_has_electrical_data,
     wire_netlist_rows,
 )
+from model import is_standard_cross_section, STANDARD_CROSS_SECTIONS_MM2
 from project_io import write_text_atomic
 import app_settings
 from ui_scaling import UI_SCALE_LABELS, normalize_ui_scale_percent
@@ -396,6 +399,89 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
 
         self.assertTrue(any("connector J100 heeft 2 pin" in item for item in findings))
         self.assertTrue(any("onbekend van-pinlabel J100:A9" in item for item in warnings))
+
+    def test_connector_pin_label_prefers_explicit_label_then_index(self):
+        self.assertEqual(connector_pin_label(0, ["A1", "A2"]), "A1")
+        self.assertEqual(connector_pin_label(1, ["A1", "A2"]), "A2")
+        self.assertEqual(connector_pin_label(2, ["A1", "A2"]), "3")
+        self.assertEqual(connector_pin_label(0, []), "1")
+
+    def test_standard_cross_section_recognises_common_values(self):
+        for std in STANDARD_CROSS_SECTIONS_MM2:
+            self.assertTrue(is_standard_cross_section(std))
+        self.assertFalse(is_standard_cross_section(0.41))
+
+    def test_drc_reports_unconnected_pins_and_nonstandard_cross_section(self):
+        wires = [
+            WirePath(
+                wire_id="W1",
+                points_mm=[(0.0, 0.0), (10.0, 0.0)],
+                signal_name="SIG",
+                from_connector="J1",
+                from_pin="1",
+                to_connector="J2",
+                to_pin="1",
+                cross_section_mm2=0.41,
+                length_mm=100.0,
+            ),
+        ]
+        findings, warnings = wire_electrical_drc(wires, {"J1": (2, []), "J2": (1, [])})
+        # J1 pin 2 is nergens aangesloten; J1/J2 pin 1 wel.
+        self.assertTrue(any("Pin J1:2 is niet aangesloten" in item for item in warnings))
+        self.assertFalse(any("Pin J1:1 is niet aangesloten" in item for item in warnings))
+        self.assertFalse(any("Pin J2:1 is niet aangesloten" in item for item in warnings))
+        self.assertTrue(any("niet-standaard doorsnede" in item for item in warnings))
+
+    def test_pin_world_positions_track_connector_position_and_count(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        app.symbols = {
+            "sym": StepSymbol(
+                name="sym",
+                source_path="",
+                projection="Top (XY)",
+                polylines=[[(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0), (0.0, 0.0)]],
+                width_mm=10.0,
+                height_mm=6.0,
+            )
+        }
+        connector = ConnectorInstance(connector_id="J1", symbol_name="sym", x_mm=20.0, y_mm=30.0, scale=1.0, pin_count=3)
+        pins = app._connector_pin_world_points(connector)
+        self.assertEqual([p[0] for p in pins], ["1", "2", "3"])
+        # Verschuif de connector: pins schuiven exact mee.
+        connector.x_mm += 5.0
+        pins_shifted = app._connector_pin_world_points(connector)
+        for (_l0, x0, y0), (_l1, x1, y1) in zip(pins, pins_shifted):
+            self.assertAlmostEqual(x1 - x0, 5.0)
+            self.assertAlmostEqual(y1 - y0, 0.0)
+
+    def test_derive_netlist_from_geometry_links_endpoints_to_pins(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        app.symbols = {
+            "sym": StepSymbol(
+                name="sym",
+                source_path="",
+                projection="Top (XY)",
+                polylines=[[(0.0, 0.0), (10.0, 0.0), (10.0, 6.0), (0.0, 6.0), (0.0, 0.0)]],
+                width_mm=10.0,
+                height_mm=6.0,
+            )
+        }
+        c1 = ConnectorInstance(connector_id="J1", symbol_name="sym", x_mm=0.0, y_mm=0.0, scale=1.0, pin_count=2)
+        c2 = ConnectorInstance(connector_id="J2", symbol_name="sym", x_mm=100.0, y_mm=0.0, scale=1.0, pin_count=2)
+        app.connectors = [c1, c2]
+        pin_a = app._connector_pin_world_points(c1)[0]  # (label, x, y)
+        pin_b = app._connector_pin_world_points(c2)[1]
+        wire = WirePath(wire_id="W1", points_mm=[(pin_a[1], pin_a[2]), (pin_b[1], pin_b[2])])
+        app.wires = [wire]
+        app.selected = None
+        app._capture_before_change = lambda: None
+        app._commit_change = lambda *a, **k: None
+        app.redraw = lambda *a, **k: None
+        app.status = lambda *a, **k: None
+        changed = app.derive_netlist_from_geometry(tol_mm=1.0, announce=False)
+        self.assertEqual(changed, 2)
+        self.assertEqual((wire.from_connector, wire.from_pin), ("J1", pin_a[0]))
+        self.assertEqual((wire.to_connector, wire.to_pin), ("J2", pin_b[0]))
 
     def test_paper_preset_detection(self):
         self.assertEqual(paper_preset_for_dimensions(420.0, 297.0), "IEC A3 liggend")

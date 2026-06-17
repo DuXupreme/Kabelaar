@@ -15,6 +15,7 @@ import base64
 import csv
 import io
 import json
+import logging
 import math
 import mimetypes
 import re
@@ -28,6 +29,7 @@ from xml.sax.saxutils import escape
 import threading
 
 from app_settings import default_settings_path, existing_dir, load_app_settings, parent_dir, update_app_settings
+from logging_setup import configure_logging, log_path
 from project_io import write_text_atomic
 from ui_scaling import UI_SCALE_LABELS, enable_dpi_awareness, normalize_ui_scale_percent, schedule_window_scaling, set_ui_scale
 import theme as ui_theme
@@ -99,6 +101,7 @@ from model import (
     WIRE_STYLE_TO_INTERNAL,
     WIRE_STYLE_TO_LABEL,
     WirePath,
+    connector_pin_label,
     csv_text,
     dimension_orientation_internal,
     dimension_orientation_label,
@@ -152,6 +155,8 @@ try:
 except Exception:
     cairosvg = None
     CAIROSVG_AVAILABLE = False
+
+LOGGER = logging.getLogger("kabelboom")
 
 APP_TITLE = "Kabelboom Tekenstudio"
 APP_SETTINGS_KEY = "kabelboom_tekenstudio"
@@ -498,6 +503,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.tol_xxx_var = tk.StringVar(value="±0.05")
         self.paper_preset_var = tk.StringVar(value=DEFAULT_PAPER_PRESET)
         self.status_var = tk.StringVar(value="Klaar")
+        self.coord_var = tk.StringVar(value="x= -  y= -")
         self.mode_var = tk.StringVar(value="Mode: Select")
         self.snap_grid_enabled_var = tk.BooleanVar(value=True)
         self.snap_grid_mm_var = tk.StringVar(value="1.0")
@@ -690,6 +696,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.bind_all("<Control-v>", self.paste_from_clipboard)
         self.bind_all("<Delete>", self._on_shortcut_delete)
         self.bind_all("<Control-d>", self._on_shortcut_duplicate)
+        self.bind_all("<F1>", lambda _e: self.show_shortcuts_dialog())
 
     # ---------------- Reusable blocks ----------------
     def _blocks_library_path(self) -> Path:
@@ -1657,6 +1664,141 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         out = {"parent": self}
         out.update(kwargs)
         return out
+
+    SHORTCUT_GROUPS = [
+        ("Algemeen", [
+            ("Ctrl+N", "Nieuw project"),
+            ("Ctrl+O", "Project openen"),
+            ("Ctrl+S", "Opslaan"),
+            ("Ctrl+Shift+S", "Opslaan als"),
+            ("Ctrl+Z / Ctrl+Y", "Undo / Redo"),
+            ("F1", "Dit overzicht"),
+        ]),
+        ("Bewerken", [
+            ("Ctrl+V", "Plak tekst of afbeelding uit klembord"),
+            ("Ctrl+D", "Dupliceer selectie"),
+            ("Delete", "Verwijder selectie"),
+            ("Esc", "Terug naar Selecteer/verplaats; stopt huidige actie"),
+            ("Enter", "Stop de draadketen"),
+            ("Shift / Ctrl + klik", "Selectie uitbreiden"),
+        ]),
+        ("Muis", [
+            ("Muiswiel", "In-/uitzoomen"),
+            ("Middenmuis slepen", "Pannen"),
+            ("Rechtermuisknop", "Contextopties (extra bewerkacties)"),
+            ("Shift bij draad", "Recht tekenen (horizontaal/verticaal)"),
+            ("Dubbelklik bibliotheek", "Connector direct plaatsen"),
+        ]),
+        ("Snappen", [
+            ("Grid snap", "Vangt op het rasterpunt (stap instelbaar)"),
+            ("Endpoint snap", "Vangt op draadeinden om door te tekenen"),
+        ]),
+    ]
+
+    def new_project_from_template(self):
+        """Mini-startscherm: kies een bladformaat-sjabloon en begin een nieuw project."""
+        self._prepare_dialog_parent()
+        win = tk.Toplevel(self)
+        win.title("Nieuw uit sjabloon")
+        win.transient(self)
+        win.resizable(False, False)
+        result = {"preset": None}
+
+        container = ttk.Frame(win, padding=16)
+        container.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(container, text="Kies een bladformaat om mee te beginnen", font=("Segoe UI", 11, "bold")).grid(
+            row=0, column=0, sticky="w", pady=(0, 10)
+        )
+        presets = [p for p in PAPER_PRESET_OPTIONS if p != PAPER_PRESET_CUSTOM]
+        choice_var = tk.StringVar(value=DEFAULT_PAPER_PRESET if DEFAULT_PAPER_PRESET in presets else (presets[0] if presets else ""))
+        radios = ttk.Frame(container)
+        radios.grid(row=1, column=0, sticky="w")
+        for idx, preset in enumerate(presets):
+            ttk.Radiobutton(radios, text=preset, value=preset, variable=choice_var).grid(
+                row=idx // 2, column=idx % 2, sticky="w", padx=(0, 18), pady=1
+            )
+
+        def _create():
+            result["preset"] = choice_var.get()
+            win.destroy()
+
+        def _cancel():
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _cancel)
+        win.bind("<Escape>", lambda _e: _cancel())
+        win.bind("<Return>", lambda _e: _create())
+        buttons = ttk.Frame(container)
+        buttons.grid(row=2, column=0, sticky="e", pady=(14, 0))
+        ttk.Button(buttons, text="Annuleren", command=_cancel).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(buttons, text="Maak project", style="Primary.TButton", command=_create).grid(row=0, column=1)
+
+        win.update_idletasks()
+        try:
+            px = self.winfo_rootx() + max(0, (self.winfo_width() - win.winfo_width()) // 2)
+            py = self.winfo_rooty() + max(0, (self.winfo_height() - win.winfo_height()) // 3)
+            win.geometry(f"+{px}+{py}")
+        except tk.TclError:
+            pass
+        win.grab_set()
+        win.focus_set()
+        self.wait_window(win)
+
+        if result["preset"]:
+            self.new_project(paper_preset=result["preset"])
+            self.fit_page_to_view()
+            self.status(f"Nieuw project ({result['preset']}).")
+
+    def show_shortcuts_dialog(self):
+        self._prepare_dialog_parent()
+        if getattr(self, "_shortcuts_window", None) is not None:
+            try:
+                self._shortcuts_window.deiconify()
+                self._shortcuts_window.lift()
+                self._shortcuts_window.focus_set()
+                return
+            except tk.TclError:
+                self._shortcuts_window = None
+        win = tk.Toplevel(self)
+        win.title("Sneltoetsen & muisbediening")
+        win.transient(self)
+        win.resizable(False, False)
+        try:
+            win.configure(background=ui_theme.color(self._app_theme, "canvas_bg"))
+        except Exception:
+            pass
+        self._shortcuts_window = win
+
+        def _close():
+            self._shortcuts_window = None
+            win.destroy()
+
+        win.protocol("WM_DELETE_WINDOW", _close)
+        win.bind("<Escape>", lambda _e: _close())
+
+        container = ttk.Frame(win, padding=14)
+        container.grid(row=0, column=0, sticky="nsew")
+        ttk.Label(container, text="Sneltoetsen & muisbediening", font=("Segoe UI", 12, "bold")).grid(
+            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
+        )
+        row = 1
+        for group_title, entries in self.SHORTCUT_GROUPS:
+            frame = ttk.LabelFrame(container, text=group_title, padding=(10, 6))
+            frame.grid(row=row, column=0, sticky="ew", pady=(0, 8))
+            frame.columnconfigure(1, weight=1)
+            for idx, (keys, desc) in enumerate(entries):
+                ttk.Label(frame, text=keys, style="Subtle.TLabel", width=20, anchor="w").grid(row=idx, column=0, sticky="w", padx=(0, 10))
+                ttk.Label(frame, text=desc, anchor="w").grid(row=idx, column=1, sticky="w")
+            row += 1
+        ttk.Button(container, text="Sluiten", command=_close).grid(row=row, column=0, sticky="e", pady=(2, 0))
+        win.update_idletasks()
+        try:
+            px = self.winfo_rootx() + max(0, (self.winfo_width() - win.winfo_width()) // 2)
+            py = self.winfo_rooty() + max(0, (self.winfo_height() - win.winfo_height()) // 3)
+            win.geometry(f"+{px}+{py}")
+        except tk.TclError:
+            pass
+        win.focus_set()
 
     def _show_info(self, message: str, title: str = APP_TITLE):
         self._prepare_dialog_parent()
@@ -6375,7 +6517,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         else:
             snapped_world = world
         self.cursor_world = snapped_world
-        self.status(f"{self.mode_var.get()} | x={snapped_world[0]:.1f} mm, y={snapped_world[1]:.1f} mm")
+        self.coord_var.set(f"x={snapped_world[0]:.1f} mm   y={snapped_world[1]:.1f} mm")
 
         if self.mode == "select" and self.selected and self.selected[0] == "table":
             table = self._find_table(self.selected[1])
@@ -6686,6 +6828,102 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         if x1 <= px <= x2 and y1 <= py <= y2:
             return conn
         return None
+
+    def _symbol_raw_bbox(self, sym: StepSymbol) -> Tuple[float, float, float, float]:
+        xs: List[float] = []
+        ys: List[float] = []
+        for line in sym.polylines:
+            for x, y in line:
+                xs.append(x)
+                ys.append(y)
+        if not xs:
+            return (0.0, 0.0, 0.0, 0.0)
+        return (min(xs), min(ys), max(xs), max(ys))
+
+    def _connector_pin_local_points(self, connector: ConnectorInstance) -> List[Tuple[str, float, float]]:
+        """Pin-posities in symbool-lokale coördinaten (vóór schaal/rotatie).
+
+        Gebruikt expliciete ``pin_offsets_mm`` als die er zijn, anders een
+        automatische rij gelijkmatig verdeeld over de breedte van het symbool.
+        """
+        count = max(1, connector.pin_count)
+        labels = connector.pin_labels
+        offsets = connector.pin_offsets_mm
+        if offsets and len(offsets) >= count:
+            return [(connector_pin_label(i, labels), float(offsets[i][0]), float(offsets[i][1])) for i in range(count)]
+        sym = self.symbols.get(connector.symbol_name)
+        if not sym:
+            return [(connector_pin_label(i, labels), 0.0, 0.0) for i in range(count)]
+        sx1, sy1, sx2, sy2 = self._symbol_raw_bbox(sym)
+        width = sx2 - sx1
+        center_y = (sy1 + sy2) / 2.0
+        points: List[Tuple[float, float]] = []
+        if count == 1:
+            points.append(((sx1 + sx2) / 2.0, center_y))
+        else:
+            margin = width * 0.12
+            x0 = sx1 + margin
+            x1 = sx2 - margin
+            for i in range(count):
+                t = i / (count - 1)
+                points.append((x0 + t * (x1 - x0), center_y))
+        return [(connector_pin_label(i, labels), px, py) for i, (px, py) in enumerate(points)]
+
+    def _connector_pin_world_points(self, connector: ConnectorInstance) -> List[Tuple[str, float, float]]:
+        """Pin-posities als (label, wereld-x, wereld-y)."""
+        result: List[Tuple[str, float, float]] = []
+        for label, lx, ly in self._connector_pin_local_points(connector):
+            wx, wy = self._connector_local_to_world(connector, lx, ly)
+            result.append((label, wx, wy))
+        return result
+
+    def _all_pin_world_points(self) -> List[Tuple[str, str, float, float]]:
+        """Alle pins van alle connectors als (connector_id, pin_label, x, y)."""
+        pins: List[Tuple[str, str, float, float]] = []
+        for connector in self.connectors:
+            for label, wx, wy in self._connector_pin_world_points(connector):
+                pins.append((connector.connector_id, label, wx, wy))
+        return pins
+
+    def _nearest_pin(self, pins: List[Tuple[str, str, float, float]], point: Tuple[float, float], tol_mm: float) -> Optional[Tuple[str, str]]:
+        best: Optional[Tuple[str, str]] = None
+        best_dist = tol_mm
+        for connector_id, label, wx, wy in pins:
+            dist = math.hypot(wx - point[0], wy - point[1])
+            if dist <= best_dist:
+                best_dist = dist
+                best = (connector_id, label)
+        return best
+
+    def derive_netlist_from_geometry(self, tol_mm: float = 4.0, announce: bool = True) -> int:
+        """Vul van/naar connector+pin van elke draad op basis van welke pin het
+        draadeinde geometrisch raakt. Geeft het aantal bijgewerkte koppelingen terug."""
+        pins = self._all_pin_world_points()
+        if not pins:
+            if announce:
+                self._show_info("Geen connector-pins gevonden. Plaats eerst connectors met pins.")
+            return 0
+        before = self._capture_before_change()
+        changed = 0
+        for wire in self.wires:
+            if len(wire.points_mm) < 2:
+                continue
+            start_pin = self._nearest_pin(pins, wire.points_mm[0], tol_mm)
+            end_pin = self._nearest_pin(pins, wire.points_mm[-1], tol_mm)
+            if start_pin and (wire.from_connector != start_pin[0] or wire.from_pin != start_pin[1]):
+                wire.from_connector, wire.from_pin = start_pin
+                changed += 1
+            if end_pin and (wire.to_connector != end_pin[0] or wire.to_pin != end_pin[1]):
+                wire.to_connector, wire.to_pin = end_pin
+                changed += 1
+        if changed:
+            self.redraw()
+            if self.selected and self.selected[0] == "wire":
+                self.load_selection_properties_to_panel()
+            self._commit_change(before, "Netlist uit tekening afgeleid.")
+        if announce:
+            self.status(f"Netlist afgeleid: {changed} koppeling(en) bijgewerkt op basis van pin-posities.")
+        return changed
 
     def _table_col_widths(self, table: TableBox) -> List[float]:
         widths = [float(w) for w in table.col_widths_mm if float(w) > 0.0]
@@ -7303,6 +7541,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 pin_labels=list(obj.pin_labels),
                 label_dx_mm=obj.label_dx_mm,
                 label_dy_mm=obj.label_dy_mm,
+                pin_offsets_mm=list(obj.pin_offsets_mm),
             )
             self.connectors.append(clone)
             self._set_single_selection("connector", nid)
@@ -7933,6 +8172,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
 
 
 def main():
+    configure_logging()
     enable_dpi_awareness()
     app = HarnessDrawingStudio()
     app.mainloop()

@@ -841,7 +841,6 @@ class UIBuilderMixin:
         ttk.Button(top, text="Zoom -", style="Tool.TButton", command=lambda: self.zoom_by(1 / 1.15)).grid(row=0, column=9, padx=2)
         ttk.Button(top, text="Zoom +", style="Tool.TButton", command=lambda: self.zoom_by(1.15)).grid(row=0, column=10, padx=2)
         ttk.Label(top, textvariable=self.mode_var, style="Status.TLabel").grid(row=0, column=11, sticky="w", padx=(10, 0))
-        ttk.Label(top, textvariable=self.status_var, style="Status.TLabel").grid(row=0, column=12, sticky="e")
 
         snap_row = ttk.Frame(top)
         snap_row.grid(row=1, column=0, columnspan=13, sticky="ew", pady=(6, 0))
@@ -869,13 +868,19 @@ class UIBuilderMixin:
         self.canvas = tk.Canvas(canvas_wrap, background=ui_theme.color(self._app_theme, "canvas_bg"), highlightthickness=0)
         self.canvas.grid(row=0, column=0, sticky="nsew")
 
-        hint = ttk.Label(
-            self,
-            text="Tip: muiswiel = zoom, middenmuis = pan, SHIFT bij draad = recht (h/v), endpoint snap laat je op draadeinden verdergaan, rechtermuisklik op een draad geeft extra bewerkopties, Ctrl+V = plak tekst/afbeelding, Ctrl+Z/Y = undo/redo, Ctrl+S = opslaan, ENTER stopt keten, ESC = Selecteer/verplaats.",
-            padding=(8, 0, 8, 8),
-        )
-        hint.grid(row=2, column=2, sticky="ew")
+        self._build_status_bar()
         self._update_mode_buttons()
+
+    def _build_status_bar(self):
+        status = ttk.Frame(self, padding=(8, 2, 8, 4))
+        status.grid(row=2, column=2, sticky="ew")
+        status.columnconfigure(0, weight=1)
+        ttk.Label(status, textvariable=self.status_var, style="Subtle.TLabel", anchor="w").grid(row=0, column=0, sticky="ew")
+        ttk.Separator(status, orient="vertical").grid(row=0, column=1, sticky="ns", padx=8)
+        ttk.Label(status, textvariable=self.coord_var, style="Subtle.TLabel", anchor="e", width=22).grid(row=0, column=2, sticky="e")
+        help_btn = ttk.Button(status, text="? Sneltoetsen", style="Tool.TButton", command=self.show_shortcuts_dialog)
+        help_btn.grid(row=0, column=3, sticky="e", padx=(8, 0))
+        attach_tooltip(help_btn, "Toon alle sneltoetsen en muisbediening (F1)")
 
     def _populate_panel_menu(self, menu: tk.Menu):
         menu.add_checkbutton(
@@ -990,6 +995,7 @@ class UIBuilderMixin:
 
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label="Nieuw project", command=self.new_project, accelerator="Ctrl+N")
+        file_menu.add_command(label="Nieuw uit sjabloon...", command=self.new_project_from_template)
         file_menu.add_command(label="Open project...", command=self.open_project, accelerator="Ctrl+O")
         file_menu.add_separator()
         file_menu.add_command(label="Opslaan", command=self.save_project, accelerator="Ctrl+S")
@@ -1027,6 +1033,7 @@ class UIBuilderMixin:
 
         tools_menu = tk.Menu(menubar, tearoff=0)
         tools_menu.add_command(label="Projectcontrole (DRC)", command=self.run_project_check)
+        tools_menu.add_command(label="Netlist uit tekening afleiden", command=self.derive_netlist_from_geometry)
         tools_menu.add_command(label="Projectinventaris", command=self.show_project_inventory)
         tools_menu.add_separator()
         tools_menu.add_command(label="Selectie opslaan als blok...", command=self.save_selection_as_block)
@@ -1036,6 +1043,8 @@ class UIBuilderMixin:
         menubar.add_cascade(label="Tools", menu=tools_menu)
 
         help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="Sneltoetsen & muisbediening", command=self.show_shortcuts_dialog, accelerator="F1")
+        help_menu.add_separator()
         help_menu.add_command(label="Zoek naar updates...", command=self.check_for_updates_interactive)
         menubar.add_cascade(label="Help", menu=help_menu)
 
