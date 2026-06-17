@@ -50,7 +50,7 @@ volgen ttk-thema's niet automatisch — die moeten expliciet uit `theme.py` gevo
 
 ---
 
-## Batch 3 — Architectuur: de monoliet opsplitsen 🟠 ◐ DEELS GEDAAN (3.1–3.5)
+## Batch 3 — Architectuur: de monoliet opsplitsen 🟠 ✅ GEDAAN
 
 **Doel:** van één bestand van 10.428 regels / één god-class naar testbare modules.
 Stapsgewijs; tests blijven na elke stap groen.
@@ -62,19 +62,24 @@ Stapsgewijs; tests blijven na elke stap groen.
 | 3.3 | Pure geometrie-helpers (`distance_point_segment`, `closest_point_on_segment`, …) | `geometry.py` | ✅ |
 | 3.4 | Canvas- en SVG-rendering (`_draw_*`, `_svg_*`) | `rendering.py` (`RenderingMixin`) | ✅ |
 | 3.5 | Project-IO en data-export (`_project_dict`, `_load_project_dict`, save/open/new, SVG/netlist/BOM) | `io_project.py` (`ProjectIOMixin`) | ✅ |
-| 3.6 | UI-opbouw per paneel uit `_build_ui` halen | `ui/panels.py` | ⏳ open (laatst) |
+| 3.6 | UI-opbouw uit `_build_ui` halen | `ui_panels.py` (`UIBuilderMixin`) | ✅ |
 
 > Uitgevoerd: `geometry.py`, `step_import.py`, `model.py`, `rendering.py`
-> (`RenderingMixin`) en `io_project.py` (`ProjectIOMixin`: project save/load +
-> SVG/netlist/BOM-export) losgetrokken. Mixin-aanpak houdt gedrag identiek
-> (methodes verhuizen letterlijk mét `self`). `PROJECT_SCHEMA_VERSION` en de
-> `DEFAULT_WIRE_BRIDGE_*`-constants naar `model.py` verplaatst om circulaire
-> imports te voorkomen. Dode code achter `preview_project` opgeruimd.
-> Hoofdbestand: 10.428 → 8.661 regels. 29/29 tests groen + render/SVG/IO-smoketests.
+> (`RenderingMixin`), `io_project.py` (`ProjectIOMixin`) en `ui_panels.py`
+> (`UIBuilderMixin`: `_build_ui`, panelen, thema/UI-schaal, menubar) losgetrokken.
+> Mixin-aanpak houdt gedrag identiek (methodes verhuizen letterlijk mét `self`).
+> `PROJECT_SCHEMA_VERSION` + `DEFAULT_WIRE_BRIDGE_*` → `model.py`,
+> `LEFT_PANEL_DEFINITIONS` + `UI_NAMED_FONTS` → `ui_panels.py` (circulaire imports
+> voorkomen). Dode code achter `preview_project` opgeruimd.
+> **Hoofdbestand: 10.428 → 7.677 regels (−26%).** 29/29 tests groen +
+> render/SVG/IO/UI-smoketests.
 
-**Resteert:** alleen nog 3.6 (UI-opbouw). Dit is het grootst omdat `_build_ui`
-en de panelen veel widget-state op `self` zetten; met dezelfde mixin-techniek wél te doen.
-**Aanpak:** mixin-klassen of terug-import in `kabelboom_tekenstudio.py` zodat publieke namen + tests blijven werken.
+`HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk)` —
+de god-class is nu een dunne controller met de logica verdeeld over zes modules.
+
+> **Bewust in de hoofdklasse gebleven:** PNG/PDF-export (`_render_page_image`,
+> `export_png/pdf`) — verweven met teken-helpers (`_title_block_drawing`, `_pil_font`).
+> Kan later naar een gedeelde rendering/io-laag.
 
 > **PNG/PDF-export** (`_render_page_image`, `export_png/pdf`) is bewust in de hoofdklasse
 > gebleven: die is verweven met teken-helpers (`_title_block_drawing`, `_pil_font`, …)
