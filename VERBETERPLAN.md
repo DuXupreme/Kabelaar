@@ -50,28 +50,29 @@ volgen ttk-thema's niet automatisch — die moeten expliciet uit `theme.py` gevo
 
 ---
 
-## Batch 3 — Architectuur: de monoliet opsplitsen 🟠 ◐ DEELS GEDAAN (3.2 + 3.3)
+## Batch 3 — Architectuur: de monoliet opsplitsen 🟠 ◐ DEELS GEDAAN (3.1 + 3.2 + 3.3)
 
 **Doel:** van één bestand van 10.428 regels / één god-class naar testbare modules.
 Stapsgewijs; tests blijven na elke stap groen.
 
 | # | Taak | Nieuw bestand | Status |
 |---|------|---------------|--------|
-| 3.1 | Dataclasses verplaatsen (`WirePath`, `ConnectorInstance`, `Leader`, `DimensionLine`, `TableBox`, `TextNote`, `ImageNote`, `StepSymbol`) + bijbehorende constants | `model.py` | ⏳ open (constants-ontvlechting nodig) |
+| 3.1 | Dataclasses verplaatsen (`WirePath`, `ConnectorInstance`, `Leader`, `DimensionLine`, `TableBox`, `TextNote`, `ImageNote`, `StepSymbol`) + bijbehorende constants + model-helpers | `model.py` | ✅ |
 | 3.2 | STEP-parsing + projectie | `step_import.py` | ✅ |
 | 3.3 | Pure geometrie-helpers (`distance_point_segment`, `closest_point_on_segment`, …) | `geometry.py` | ✅ |
 | 3.4 | Canvas- en SVG-rendering (`_draw_*`, `_svg_*`) | `rendering.py` | ⏳ open (raakt veel) |
 | 3.5 | Project-IO en exports (`_project_dict`, `_load_project_dict`, netlist/BOM/PNG/PDF) | `io_project.py` | ⏳ open |
 | 3.6 | UI-opbouw per paneel uit `_build_ui` halen | `ui/panels.py` | ⏳ open (laatst) |
 
-> Uitgevoerd: `geometry.py` (pure 2D/3D-math) en `step_import.py` (STEP-parser, hangt
-> alleen van `geometry` af) losgetrokken en terug-geïmporteerd in de hoofdmodule, zodat
-> alle publieke namen en tests blijven werken. Tevens dode code achter `preview_project`
-> opgeruimd. Hoofdbestand: 10.428 → 10.235 regels. 29/29 tests groen.
+> Uitgevoerd: `geometry.py` (pure 2D/3D-math), `step_import.py` (STEP-parser) en
+> `model.py` (dataclasses + model-constants + helpers zoals netlist/BOM/DRC)
+> losgetrokken en terug-geïmporteerd in de hoofdmodule, zodat alle publieke namen
+> en tests blijven werken. Dode code achter `preview_project` opgeruimd.
+> Hoofdbestand: 10.428 → 9.868 regels. 29/29 tests groen.
 
+**Resteert:** 3.4 (rendering), 3.5 (io/exports), 3.6 (ui) — dit zijn `self`-methodes van
+de god-class en vergen een controller-herstructurering (groter, hoger risico).
 **Aanpak:** importeer terug in `kabelboom_tekenstudio.py` zodat de publieke namen (en de tests) blijven werken.
-**Risico:** midden — `model.py` vergt het meeverhuizen van ~20 constants (vandaar uitgesteld);
-3.4/3.5 raken veel. Klein committen, per module testen.
 
 ---
 
