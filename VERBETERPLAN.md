@@ -50,7 +50,7 @@ volgen ttk-thema's niet automatisch — die moeten expliciet uit `theme.py` gevo
 
 ---
 
-## Batch 3 — Architectuur: de monoliet opsplitsen 🟠 ◐ DEELS GEDAAN (3.1 + 3.2 + 3.3)
+## Batch 3 — Architectuur: de monoliet opsplitsen 🟠 ◐ DEELS GEDAAN (3.1–3.4)
 
 **Doel:** van één bestand van 10.428 regels / één god-class naar testbare modules.
 Stapsgewijs; tests blijven na elke stap groen.
@@ -60,19 +60,20 @@ Stapsgewijs; tests blijven na elke stap groen.
 | 3.1 | Dataclasses verplaatsen (`WirePath`, `ConnectorInstance`, `Leader`, `DimensionLine`, `TableBox`, `TextNote`, `ImageNote`, `StepSymbol`) + bijbehorende constants + model-helpers | `model.py` | ✅ |
 | 3.2 | STEP-parsing + projectie | `step_import.py` | ✅ |
 | 3.3 | Pure geometrie-helpers (`distance_point_segment`, `closest_point_on_segment`, …) | `geometry.py` | ✅ |
-| 3.4 | Canvas- en SVG-rendering (`_draw_*`, `_svg_*`) | `rendering.py` | ⏳ open (raakt veel) |
+| 3.4 | Canvas- en SVG-rendering (`_draw_*`, `_svg_*`) | `rendering.py` (`RenderingMixin`) | ✅ |
 | 3.5 | Project-IO en exports (`_project_dict`, `_load_project_dict`, netlist/BOM/PNG/PDF) | `io_project.py` | ⏳ open |
 | 3.6 | UI-opbouw per paneel uit `_build_ui` halen | `ui/panels.py` | ⏳ open (laatst) |
 
-> Uitgevoerd: `geometry.py` (pure 2D/3D-math), `step_import.py` (STEP-parser) en
-> `model.py` (dataclasses + model-constants + helpers zoals netlist/BOM/DRC)
-> losgetrokken en terug-geïmporteerd in de hoofdmodule, zodat alle publieke namen
-> en tests blijven werken. Dode code achter `preview_project` opgeruimd.
-> Hoofdbestand: 10.428 → 9.868 regels. 29/29 tests groen.
+> Uitgevoerd: `geometry.py` (pure 2D/3D-math), `step_import.py` (STEP-parser),
+> `model.py` (dataclasses + model-constants + helpers) en `rendering.py`
+> (`RenderingMixin`: alle canvas- en SVG-tekencode) losgetrokken. De mixin-aanpak
+> houdt het gedrag identiek: methodes verhuizen letterlijk mét `self`, de hoofdklasse
+> erft ervan. Dode code achter `preview_project` opgeruimd.
+> Hoofdbestand: 10.428 → 9.261 regels. 29/29 tests groen + render/SVG-smoketest.
 
-**Resteert:** 3.4 (rendering), 3.5 (io/exports), 3.6 (ui) — dit zijn `self`-methodes van
-de god-class en vergen een controller-herstructurering (groter, hoger risico).
-**Aanpak:** importeer terug in `kabelboom_tekenstudio.py` zodat de publieke namen (en de tests) blijven werken.
+**Resteert:** 3.5 (io/exports) en 3.6 (ui). Kunnen met dezelfde mixin-techniek;
+3.6 (UI-opbouw) is het grootst omdat `_build_ui` veel widget-state op `self` zet.
+**Aanpak:** mixin-klassen of terug-import in `kabelboom_tekenstudio.py` zodat publieke namen + tests blijven werken.
 
 ---
 
