@@ -13,6 +13,11 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 
+PROJECT_SCHEMA_VERSION = 1
+DEFAULT_WIRE_BRIDGE_ENABLED = True
+DEFAULT_WIRE_BRIDGE_HEIGHT_MM = 2.8
+DEFAULT_WIRE_BRIDGE_LENGTH_MM = 8.5
+DEFAULT_WIRE_BRIDGE_CLEARANCE_MM = 10.0
 WIRE_STYLE_OPTIONS = ["Recht", "Gebogen", "Twisted Pair", "Twisted Pair gebogen"]
 WIRE_STYLE_TO_INTERNAL = {
     "Recht": "straight",
