@@ -11,6 +11,7 @@ from tkinter import font as tkfont, ttk
 from typing import List
 
 import theme as ui_theme
+import warm_theme
 from ui_tooltip import attach as attach_tooltip
 from geometry import clamp
 from ui_scaling import UI_SCALE_LABELS, normalize_ui_scale_percent
@@ -92,28 +93,31 @@ class UIBuilderMixin:
             except tk.TclError:
                 continue
 
-    def _apply_sv_theme(self):
-        if sv_ttk is not None:
-            try:
-                sv_ttk.set_theme(self._app_theme)
-            except Exception:
-                pass
+    def _apply_app_theme(self):
+        """Pas het warme 'Klei & inkt'-thema toe (vervangt de Fluent-basis)."""
+        fonts = warm_theme.apply(self, getattr(self, "_app_theme", "light"))
+        self._font_family_ui = fonts["ui"]
+        self._font_family_heading = fonts["heading"]
+        self._font_family_mono = fonts["mono"]
+
+    # Behoud de oude naam als alias zodat bestaande aanroepen blijven werken.
+    _apply_sv_theme = _apply_app_theme
 
     def _configure_app_style(self):
-        style = ttk.Style(self)
         t = ui_theme.tokens(getattr(self, "_app_theme", "light"))
+        fonts = warm_theme.resolve_fonts(self)
         try:
-            style.configure("PanelHeader.TButton", anchor="w")
-            style.configure("Tool.TButton", padding=(6, 4))
-            style.configure("Primary.TButton", padding=(8, 5))
-            style.configure("Subtle.TLabel", foreground=t["subtle_fg"])
-            style.configure("Status.TLabel", foreground=t["status_fg"])
+            warm_theme.configure_ttk(ttk.Style(self), t, fonts)
         except tk.TclError:
             pass
 
     def _apply_theme_colors(self):
-        """Werk de niet-ttk chrome (canvas, grip, sidebar) bij aan het thema."""
+        """Werk de niet-ttk chrome (venster, canvas, grip, sidebar) bij aan het thema."""
         t = ui_theme.tokens(getattr(self, "_app_theme", "light"))
+        try:
+            self.configure(background=t["app_bg"])
+        except tk.TclError:
+            pass
         if hasattr(self, "canvas"):
             try:
                 self.canvas.configure(background=t["canvas_bg"])
@@ -126,8 +130,19 @@ class UIBuilderMixin:
                 pass
         if hasattr(self, "left_panel_canvas"):
             try:
-                bg = ttk.Style().lookup("TFrame", "background") or self.cget("bg")
-                self.left_panel_canvas.configure(background=bg)
+                self.left_panel_canvas.configure(background=t["app_bg"])
+            except tk.TclError:
+                pass
+        if hasattr(self, "symbol_list"):
+            try:
+                self.symbol_list.configure(
+                    background=t["field_bg"],
+                    foreground=t["text"],
+                    selectbackground=t["selection_bg"],
+                    selectforeground=t["selection_fg"],
+                    highlightthickness=0,
+                    borderwidth=0,
+                )
             except tk.TclError:
                 pass
 
@@ -384,8 +399,10 @@ class UIBuilderMixin:
             "place_connector": "Connector",
             "draw_table": "Tabel",
         }
-        active_style = "Accent.TButton" if sv_ttk is not None else "Tool.TButton"
-        use_prefix = sv_ttk is None
+        # De actieve tekenmodus krijgt het gevulde klei-accent; de tekst-prefix
+        # is niet meer nodig omdat de kleur het onderscheid al maakt.
+        active_style = "Accent.TButton"
+        use_prefix = False
         for mode, buttons in self._mode_buttons.items():
             label = labels.get(mode, mode)
             is_active = mode == self.mode

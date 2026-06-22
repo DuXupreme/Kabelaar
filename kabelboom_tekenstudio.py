@@ -401,11 +401,11 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._ui_scale_percent = normalize_ui_scale_percent(self.settings.get("ui_scale_percent", 100))
         schedule_window_scaling(self, design_size=(1500, 920), min_size=(1200, 760), apply_tk_scaling=False)
 
-        # Pas het thema toe vóór het vastleggen van basis-padding/fonts, zodat
-        # de sv-ttk styling als uitgangspunt wordt gemeten.
+        # Pas het warme thema toe vóór het vastleggen van basis-padding/fonts,
+        # zodat de eigen ttk-styling als uitgangspunt wordt gemeten.
         self._app_theme = ui_theme.normalize_theme(self.settings.get("theme", "light"))
         self.app_theme_var = tk.StringVar(value=self._app_theme)
-        self._apply_sv_theme()
+        self._apply_app_theme()
 
         default_paper = paper_preset_dimensions(DEFAULT_PAPER_PRESET) or (420.0, 297.0)
         self.paper_w_mm = default_paper[0]
@@ -1742,9 +1742,12 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
 
         container = ttk.Frame(win, padding=16)
         container.grid(row=0, column=0, sticky="nsew")
-        ttk.Label(container, text="Kies een bladformaat om mee te beginnen", font=("Segoe UI", 11, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 10)
-        )
+        ttk.Label(
+            container,
+            text="Kies een bladformaat om mee te beginnen",
+            font=(getattr(self, "_font_family_heading", "Sitka Heading"), 14),
+            foreground=ui_theme.color(self._app_theme, "header_fg"),
+        ).grid(row=0, column=0, sticky="w", pady=(0, 12))
         presets = [p for p in PAPER_PRESET_OPTIONS if p != PAPER_PRESET_CUSTOM]
         choice_var = tk.StringVar(value=DEFAULT_PAPER_PRESET if DEFAULT_PAPER_PRESET in presets else (presets[0] if presets else ""))
         radios = ttk.Frame(container)
@@ -1800,7 +1803,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         win.transient(self)
         win.resizable(False, False)
         try:
-            win.configure(background=ui_theme.color(self._app_theme, "canvas_bg"))
+            win.configure(background=ui_theme.color(self._app_theme, "app_bg"))
         except Exception:
             pass
         self._shortcuts_window = win
@@ -1814,9 +1817,12 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
 
         container = ttk.Frame(win, padding=14)
         container.grid(row=0, column=0, sticky="nsew")
-        ttk.Label(container, text="Sneltoetsen & muisbediening", font=("Segoe UI", 12, "bold")).grid(
-            row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
-        )
+        ttk.Label(
+            container,
+            text="Sneltoetsen & muisbediening",
+            font=(getattr(self, "_font_family_heading", "Sitka Heading"), 15),
+            foreground=ui_theme.color(self._app_theme, "header_fg"),
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
         row = 1
         for group_title, entries in self.SHORTCUT_GROUPS:
             frame = ttk.LabelFrame(container, text=group_title, padding=(10, 6))

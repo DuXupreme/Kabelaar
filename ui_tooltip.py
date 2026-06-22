@@ -7,6 +7,9 @@ vertraging een klein zwevend label bij hover en ruimt het weer op.
 from __future__ import annotations
 
 import tkinter as tk
+from tkinter import font as tkfont
+
+import theme as ui_theme
 
 
 class Tooltip:
@@ -46,16 +49,23 @@ class Tooltip:
         self._tip = tw = tk.Toplevel(self.widget)
         tw.wm_overrideredirect(True)
         tw.wm_geometry(f"+{x}+{y}")
+        # Warme inkt-chip; dezelfde tint werkt in licht- en donkermodus.
+        chip = ui_theme.LIGHT
+        try:
+            tip_font = tkfont.nametofont("TkTooltipFont")
+        except tk.TclError:
+            tip_font = None
         label = tk.Label(
             tw,
             text=self.text,
             justify="left",
-            background="#1f2430",
-            foreground="#f1f5f9",
-            relief="solid",
-            borderwidth=1,
-            padx=8,
-            pady=4,
+            background=chip["tooltip_bg"],
+            foreground=chip["tooltip_fg"],
+            relief="flat",
+            borderwidth=0,
+            padx=10,
+            pady=6,
+            font=tip_font,
         )
         label.pack()
 
