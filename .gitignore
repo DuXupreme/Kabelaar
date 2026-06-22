@@ -29,5 +29,8 @@ symbols_library.json
 /logs/
 *.log
 
+# POC-/benchmark-output (opnieuw te genereren via tools/)
+/aa_compare.png
+
 # Claude Code tooling
 .claude/

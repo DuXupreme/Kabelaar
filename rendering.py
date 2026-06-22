@@ -7,6 +7,7 @@ die instantie. Bevat bewust geen state of __init__.
 
 from __future__ import annotations
 
+import time
 import tkinter as tk
 from pathlib import Path
 from typing import List, Tuple
@@ -19,6 +20,7 @@ from model import DimensionLine, WirePath, normalize_wire_style
 class RenderingMixin:
     def redraw(self):
         self._redraw_scheduled = False
+        _perf_t0 = time.perf_counter()
         cv = self.canvas
         cv.delete("all")
         self._canvas_image_refs = []
@@ -90,6 +92,34 @@ class RenderingMixin:
         self._draw_text_notes()
         self._draw_temporary_geometry()
         self._draw_empty_state_overlay()
+        self._record_redraw_time((time.perf_counter() - _perf_t0) * 1000.0)
+
+    def _record_redraw_time(self, elapsed_ms: float):
+        """Houd de laatste redraw-tijden bij en toon ze als de prestatiemeter aanstaat."""
+        self._last_redraw_ms = elapsed_ms
+        samples = self._redraw_ms_samples
+        samples.append(elapsed_ms)
+        if len(samples) > 30:
+            del samples[: len(samples) - 30]
+        if not getattr(self, "_show_perf_meter", False):
+            return
+        avg = sum(samples) / len(samples)
+        peak = max(samples)
+        items = len(self.canvas.find_all())
+        self.perf_var.set(
+            f"⏱ {elapsed_ms:.1f} ms  ·  gem {avg:.1f}  ·  piek {peak:.1f}  ·  {items} items"
+        )
+
+    def _drag_render_skip(self, kind: str, ident: str) -> bool:
+        """Render-filter voor incrementeel slepen. Bij ('skip', ids) wordt het versleepte
+        object overgeslagen (de bevroren achtergrondlaag); bij ('only', ids) juist alléén
+        dat object getekend (de losse 'dragmove'-laag die per beweging ververst)."""
+        flt = getattr(self, "_drag_filter", None)
+        if flt is None:
+            return False
+        mode, ids = flt
+        in_set = (kind, ident) in ids
+        return (not in_set) if mode == "only" else in_set
 
     def _project_is_empty(self) -> bool:
         return not any((
@@ -143,6 +173,8 @@ class RenderingMixin:
             max(view_y1, view_y2) + margin_mm,
         )
         for c in self.connectors:
+            if self._drag_render_skip("connector", c.connector_id):
+                continue
             sym = self.symbols.get(c.symbol_name)
             if not sym:
                 continue
@@ -185,6 +217,8 @@ class RenderingMixin:
         visible_bounds = self._visible_world_bounds()
         margin_mm = max(4.0, 18.0 / max(0.3, self.zoom))
         for note in self.image_notes:
+            if self._drag_render_skip("image", note.image_id):
+                continue
             bx1, by1, bx2, by2 = self._image_note_bbox(note)
             if bx2 < visible_bounds[0] - margin_mm or bx1 > visible_bounds[2] + margin_mm or by2 < visible_bounds[1] - margin_mm or by1 > visible_bounds[3] + margin_mm:
                 continue
@@ -207,6 +241,8 @@ class RenderingMixin:
         visible_bounds = self._visible_world_bounds()
         margin_mm = max(4.0, 18.0 / max(0.3, self.zoom))
         for note in self.text_notes:
+            if self._drag_render_skip("text", note.note_id):
+                continue
             bx1, by1, bx2, by2 = self._text_note_bbox(note)
             if bx2 < visible_bounds[0] - margin_mm or bx1 > visible_bounds[2] + margin_mm or by2 < visible_bounds[1] - margin_mm or by1 > visible_bounds[3] + margin_mm:
                 continue
@@ -233,6 +269,8 @@ class RenderingMixin:
             self.canvas.create_line(*canvas_points, fill=color, width=width_px, smooth=smooth, capstyle=tk.ROUND, joinstyle=tk.ROUND)
 
         for w in self.wires:
+            if self._drag_render_skip("wire", w.wire_id):
+                continue
             if len(w.points_mm) < 2:
                 continue
             line_width_px = max(1.0, w.width_mm * self.zoom * 0.22)
@@ -297,6 +335,8 @@ class RenderingMixin:
 
     def _draw_leaders(self):
         for l in self.leaders:
+            if self._drag_render_skip("leader", l.leader_id):
+                continue
             path = self._leader_polyline(l)
             canvas_points: List[float] = []
             for x, y in path:
@@ -331,6 +371,8 @@ class RenderingMixin:
 
     def _draw_dimensions(self):
         for dim in self.dimensions:
+            if self._drag_render_skip("dimension", dim.dim_id):
+                continue
             geo = self._dimension_geometry(dim)
             line_width_px = max(1.0, dim.line_width_mm * self.zoom * 0.22)
             f1, f2 = geo["feet"]
@@ -364,6 +406,8 @@ class RenderingMixin:
 
     def _draw_tables(self):
         for t in self.tables:
+            if self._drag_render_skip("table", t.table_id):
+                continue
             widths = self._table_col_widths(t)
             heights = self._table_row_heights(t)
             width = sum(widths)

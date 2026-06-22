@@ -18,6 +18,7 @@ import json
 import logging
 import math
 import mimetypes
+import random
 import re
 import tkinter as tk
 from dataclasses import asdict, dataclass, field
@@ -504,6 +505,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.paper_preset_var = tk.StringVar(value=DEFAULT_PAPER_PRESET)
         self.status_var = tk.StringVar(value="Klaar")
         self.coord_var = tk.StringVar(value="x= -  y= -")
+        self.perf_var = tk.StringVar(value="")
+        self.perf_meter_var = tk.BooleanVar(value=False)
         self.mode_var = tk.StringVar(value="Mode: Select")
         self.snap_grid_enabled_var = tk.BooleanVar(value=True)
         self.snap_grid_mm_var = tk.StringVar(value="1.0")
@@ -566,6 +569,16 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._pil_font_cache: Dict[Tuple[int, bool], object] = {}
         self._redraw_interval_ms = 16
         self._redraw_scheduled = False
+        self._redraw_after_id = None
+        self._show_perf_meter = False
+        self._last_redraw_ms = 0.0
+        self._redraw_ms_samples: List[float] = []
+        # Incrementeel slepen: tijdens een object-drag wordt de achtergrond bevroren en
+        # alleen het versleepte object per beweging hertekend (zie _begin_incremental_drag).
+        self._drag_filter = None
+        self._drag_incremental = False
+        self._drag_active_ids = None
+        self._drag_bg_image_refs: List[object] = []
         self._panel_sections: Dict[str, dict] = {}
         self._property_row_widgets: Dict[int, List[object]] = {}
         self._mode_buttons: Dict[str, List[ttk.Button]] = {}
@@ -1856,10 +1869,74 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         if self._redraw_scheduled:
             return
         self._redraw_scheduled = True
-        self.after(self._redraw_interval_ms, self._flush_redraw)
+        self._redraw_after_id = self.after(self._redraw_interval_ms, self._flush_redraw)
 
     def _flush_redraw(self):
         self._redraw_scheduled = False
+        self._redraw_after_id = None
+        self.redraw()
+
+    def _cancel_pending_redraw(self):
+        if self._redraw_after_id is not None:
+            try:
+                self.after_cancel(self._redraw_after_id)
+            except Exception:
+                pass
+            self._redraw_after_id = None
+        self._redraw_scheduled = False
+
+    def _toggle_perf_meter(self):
+        self._show_perf_meter = bool(self.perf_meter_var.get())
+        if self._show_perf_meter:
+            self.status("Prestatiemeter aan: redraw-tijd verschijnt rechtsonder in de statusbalk.")
+            self.redraw()
+        else:
+            self.perf_var.set("")
+            self.status("Prestatiemeter uit.")
+
+    def stress_fill_wires(self, count: Optional[int] = None):
+        """Debug-hulp: vul het blad met N testdraden om de redraw-tijd te meten.
+
+        Bereikbaar via Tools en gebruikt door tools/bench_redraw.py. De draden zijn
+        gewone WirePath-objecten met lengte + doorsnede, dus ze tellen ook mee in
+        netlist/BOM en zijn met Undo in één keer terug te draaien.
+        """
+        if count is None:
+            count = self._ask_integer(
+                "Aantal testdraden om toe te voegen (meet de redraw-prestaties):",
+                initialvalue=200, minvalue=1, maxvalue=5000,
+            )
+        if not count:
+            return
+        before = self._capture_before_change()
+        margin = self.frame_margin_mm + 6.0
+        x0, x1 = margin, max(margin + 10.0, self.paper_w_mm - margin)
+        y0, y1 = margin, max(margin + 10.0, self.paper_h_mm - margin)
+        rnd = random.Random(1234)
+        colors = ["#1f4e79", "#b03a2e", "#1e8449", "#7d3c98", "#b9770e", "#34495e"]
+        sections = [0.22, 0.35, 0.5, 0.75, 1.0, 1.5, 2.5]
+        styles = ["straight", "straight", "straight", "curve", "twisted_pair"]
+        existing = [w.wire_id for w in self.wires]
+        for _ in range(int(count)):
+            cx, cy = rnd.uniform(x0, x1), rnd.uniform(y0, y1)
+            pts = [(cx, cy)]
+            for _seg in range(rnd.randint(1, 3)):
+                cx = clamp(cx + rnd.uniform(-60.0, 60.0), x0, x1)
+                cy = clamp(cy + rnd.uniform(-40.0, 40.0), y0, y1)
+                pts.append((cx, cy))
+            wire_id = self._next_id("W", existing)
+            existing.append(wire_id)
+            length = sum(math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1))
+            self.wires.append(WirePath(
+                wire_id=wire_id,
+                points_mm=pts,
+                color=rnd.choice(colors),
+                width_mm=1.2,
+                cross_section_mm2=rnd.choice(sections),
+                length_mm=length,
+                style=rnd.choice(styles),
+            ))
+        self._commit_change(before, f"{int(count)} testdraden toegevoegd (totaal {len(self.wires)} draden).")
         self.redraw()
 
     def _on_shortcut_save(self, _event=None):
@@ -5923,6 +6000,84 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             self._drag_history_changed = False
         self.redraw()
 
+    def _drag_active_id_set(self):
+        """De (kind, id)-set die nu als geheel versleept wordt, of None als incrementeel
+        slepen niet van toepassing is."""
+        if self.drag_original_items:
+            return set(self.drag_original_items)
+        if not self.selected:
+            return None
+        if self.selected[0] == "wire" and self.drag_original_wire_points:
+            return {("wire", wid) for wid in self.drag_original_wire_points}
+        return {(self.selected[0], self.selected[1])}
+
+    def _drag_render_update(self):
+        """Hertekenen tijdens een object-drag: incrementeel (alleen het versleepte object)
+        als dat kan, anders een gewone gedebouncede redraw."""
+        if self._drag_incremental:
+            self._update_incremental_drag()
+        elif not self._begin_incremental_drag():
+            self.request_redraw()
+
+    def _begin_incremental_drag(self) -> bool:
+        ids = self._drag_active_id_set()
+        if not ids:
+            return False
+        self._cancel_pending_redraw()
+        self._drag_active_ids = ids
+        self._drag_incremental = True
+        # Achtergrond (alles behalve het versleepte object) één keer tekenen en bevriezen.
+        self._drag_filter = ("skip", ids)
+        try:
+            self.redraw()
+        finally:
+            self._drag_filter = None
+        self._drag_bg_image_refs = list(self._canvas_image_refs)
+        self._draw_drag_layer()
+        return True
+
+    def _draw_drag_layer(self):
+        """Teken alléén de versleepte objecten in een losse 'dragmove'-laag bovenop de
+        bevroren achtergrond. Tk hoeft dan enkel de kleine vuile regio te rasteren."""
+        cv = self.canvas
+        self._canvas_image_refs = list(self._drag_bg_image_refs)
+        self._drag_filter = ("only", self._drag_active_ids)
+        kinds = {kind for kind, _ident in self._drag_active_ids}
+        before = set(cv.find_all())
+        try:
+            if "image" in kinds:
+                self._draw_image_notes()
+            if "connector" in kinds:
+                self._draw_connectors()
+            if "wire" in kinds:
+                self._draw_wires()
+            if "leader" in kinds:
+                self._draw_leaders()
+            if "dimension" in kinds:
+                self._draw_dimensions()
+            if "table" in kinds:
+                self._draw_tables()
+            if "text" in kinds:
+                self._draw_text_notes()
+        finally:
+            self._drag_filter = None
+        for item in cv.find_all():
+            if item not in before:
+                cv.addtag_withtag("dragmove", item)
+
+    def _update_incremental_drag(self):
+        self.canvas.delete("dragmove")
+        self._draw_drag_layer()
+
+    def _end_incremental_drag(self):
+        if not self._drag_incremental:
+            return
+        self._drag_incremental = False
+        self._drag_active_ids = None
+        self._drag_bg_image_refs = []
+        self.canvas.delete("dragmove")
+        self.redraw()
+
     def on_left_drag(self, event):
         if self.box_select_state:
             self.box_select_state["current"] = self.canvas_to_world(event.x, event.y)
@@ -6095,7 +6250,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 self._drag_history_changed = True
                 if any(kind == "wire" for kind, _ident in self.drag_original_items):
                     self._clear_wire_geometry_caches()
-                self.request_redraw()
+                self._drag_render_update()
             return
         if self.selected[0] == "connector":
             obj = self._find_connector(self.selected[1])
@@ -6144,7 +6299,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         if self._drag_history_changed:
             if self.selected[0] == "wire":
                 self._clear_wire_geometry_caches()
-            self.request_redraw()
+            self._drag_render_update()
 
     def on_left_up(self, _event):
         if self.box_select_state:
@@ -6173,6 +6328,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                         self._drag_history_changed = True
         if self._drag_history_changed:
             self._commit_change(self._drag_history_before)
+        self._end_incremental_drag()
         self._drag_history_before = None
         self._drag_history_changed = False
         self.drag_start_world = None
@@ -7925,16 +8081,36 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 lengths.append(lengths[-1] + math.dist(line[idx], line[idx + 1]))
             prefix_lengths[wire.wire_id] = lengths
 
+        # Broad-phase: bounding box per draad, zodat draadparen die elkaar onmogelijk kunnen
+        # kruisen meteen overgeslagen worden. Dat haalt de kruisingsdetectie van O(n²) effectief
+        # naar ~O(n) voor een normale (gebundelde) kabelboom waar de meeste draden niet overlappen.
+        bboxes: Dict[str, Tuple[float, float, float, float]] = {}
+        for wid, line in centerlines.items():
+            if len(line) < 2:
+                continue
+            xs = [p[0] for p in line]
+            ys = [p[1] for p in line]
+            bboxes[wid] = (min(xs), min(ys), max(xs), max(ys))
+
         for lower_idx, lower_wire in enumerate(self.wires):
             lower_line = centerlines.get(lower_wire.wire_id, [])
             if len(lower_line) < 2:
                 continue
+            lower_bbox = bboxes.get(lower_wire.wire_id)
             for top_idx in range(lower_idx + 1, len(self.wires)):
                 top_wire = self.wires[top_idx]
                 if not self._wire_supports_bridge(top_wire):
                     continue
                 top_line = centerlines.get(top_wire.wire_id, [])
                 if len(top_line) < 2:
+                    continue
+                top_bbox = bboxes.get(top_wire.wire_id)
+                if lower_bbox and top_bbox and (
+                    top_bbox[0] > lower_bbox[2]
+                    or top_bbox[2] < lower_bbox[0]
+                    or top_bbox[1] > lower_bbox[3]
+                    or top_bbox[3] < lower_bbox[1]
+                ):
                     continue
 
                 top_segments = max(1, len(top_line) - 1)

@@ -134,6 +134,105 @@ zodat je ze in `model.py`/`io_project.py` netjes kunt bouwen.
 
 ---
 
+## Batch 6 — Professionalisering: domein-diepte + soepelheid 🔴 ⏳ BEZIG
+
+**Doel:** van "goede tekentool" naar "tool die engineers verkiezen boven AutoCAD Electrical".
+Twee sporen die elkaar versterken: **6A** maakt het resultaat een echte deliverable
+(connectiviteit → tabellen → strakke PDF), **6B** zorgt dat het soepel blijft op een vol blad
+— gemeten, niet gegokt.
+
+### 6A — Harness-domein & professionele output 🔴
+
+| # | Taak | Bestand(en) | Klaar als… | Status |
+|---|------|-------------|------------|--------|
+| 6A.1 | Automatische wire numbering (sequentieel, instelbaar prefix/format) + "Hernummer draden"-actie | `model.py`, main, `io_project.py` | nieuwe draden krijgen auto een nummer; bestaande in één actie te hernummeren | ⏳ |
+| 6A.2 | From/To-draadtabel als plaatsbaar object op het blad, gegenereerd uit de netlist | `rendering.py`, `model.py` | tabel toont Wire/Van/Naar/mm²/lengte en ververst bij wijziging | ⏳ |
+| 6A.3 | Connector-pinout/cavity-tabel uit `ConnectorInstance.pin_offsets_mm` + labels | `rendering.py`, `model.py` | per connector een pinlijst-tabel op het blad | ⏳ |
+| 6A.4 | Totale draadlengte per doorsnede/kleur zichtbaar ín de app (niet alleen CSV) | `model.py` (`wire_bom_rows` bestaat al) | lengte-staat in een paneel/dialoog | ⏳ |
+| 6A.5 | PDF/print-polish: genormde marges, scherpe lijnen, embedded fonts | `_render_page_image`, `export_pdf` | export oogt als engineering-deliverable | ⏳ |
+
+### 6B — Gemeten performance 🟠
+
+| # | Taak | Bestand(en) | Klaar als… | Status |
+|---|------|-------------|------------|--------|
+| 6B.1 | Prestatiemeter (redraw-ms in statusbalk, `Beeld ▸ Prestatiemeter`) + stress-generator (`Tools`) + headless benchmark | `rendering.py`, main, `tools/bench_redraw.py` | redraw-tijd zichtbaar én reproduceerbaar meetbaar | ✅ |
+| 6B.2 | ~~Statische bladlaag cachen (canvas-items hergebruiken)~~ — **geprobeerd, teruggedraaid** | `rendering.py` | géén winst: Tk rastert per frame de hele dirty-regio opnieuw, ook hergebruikte items | ❌ |
+| 6B.3 | **Wire-bridges broad-phase**: draadparen met niet-overlappende bounding box meteen overslaan → O(n²)→~O(n) | main (`_wire_bridge_specs`) | ~3× sneller bij 300 draden (744→247 ms) | ✅ |
+| 6B.4 | **Incrementeel slepen**: tijdens object-drag de achtergrond bevriezen en alleen het versleepte object in een 'dragmove'-laag verversen; volledige redraw alleen bij loslaten (reconcile) | `rendering.py` (filter + guards) + main (drag-orchestratie) | **4,6 ms/frame i.p.v. 220 ms — ~48× sneller, slepen ~60 fps+ ongeacht itemaantal** | ✅ |
+
+> **Meetresultaat (6B.1 — A3, fit-to-view; let op: hoge run-variantie op Windows+Tk):**
+> - **Leeg blad ≈ 70–160 ms** voor 759 items (frame/zone-markers/title block). Niet de draden maar het
+>   **aantal canvas-items dat Tk per frame moet rasteren** is de grootste vaste kost.
+> - **6B.2-les:** canvas-items hergebruiken i.p.v. `delete("all")` gaf **0 winst** — Tk rastert elke
+>   frame de hele dirty-regio opnieuw, of items nu hergebruikt worden of niet. Daarom teruggedraaid. Een
+>   statische laag helpt pas als hij naar één bitmap geplat wordt (goedkope blit) — apart, groter werk.
+> - **6B.3-winst:** wire-bridges waren O(n²) in draden; broad-phase maakt 300 draden ~3× sneller (744→247 ms).
+>   Bij extreem dichte, willekeurig kruisende draden (1000+) verschuift de kost naar het *rasteren* van de
+>   boog-items zelf — niet realistisch voor een gebundelde kabelboom.
+> - **6B.4-winst (de grote):** incrementeel slepen — achtergrond bevriezen, alleen het versleepte object
+>   per frame verversen — bracht een sleepframe van **220 ms naar 4,6 ms (~48×, ~217 fps)**. Slepen is nu
+>   soepel ongeacht het aantal objecten; dit omzeilt de rasterisatie-kost volledig. Reshape-drags
+>   (draadeinde/tangent/bocht) gebruiken nog de volledige redraw — kandidaat voor dezelfde aanpak.
+> Reproduceer met `python tools/bench_redraw.py`.
+
+**Risico:** 6A.2/6A.3 raken `model.py` + IO → schema-versie ophogen en migratie meenemen.
+6B.4 raakt de drag-handlers + kern-redraw (visuele/gedragsregressie mogelijk) → per objecttype testen.
+
+**Volgorde:** 6B.1 ✅ → 6B.3 ✅ → 6B.4 ✅ → **6A.1** (wire numbering, hoog dagelijks nut)
+→ 6A.2/6A.3 (deliverables) → 6A.5 (PDF-polish). Resteert in 6B: reshape-drags incrementeel maken (optioneel).
+
+---
+
+## Batch 7 — Renderkwaliteit + echte STEP-import 🔴 ⏳ BEZIG
+
+**Aanleiding (gebruikersfeedback):** de twee grootste pijnpunten in dagelijks gebruik —
+de "trapjes" op de lijnen, en STEP-bestanden die slecht importeren.
+
+### 7A — Anti-aliased, image-based rendering 🔴
+
+Probleem: `tk.Canvas` doet geen anti-aliasing → trapjes op diagonalen, ruwe boogjes. POC
+(`tools/aa_render_poc.py`) bewijst: supersampling (2–3× + LANCZOS) geeft strakke lijnen; een
+vol A3-blad met 300 lijnen @ 2× ≈ **78 ms** per regen (gecachet → alleen bij wijziging).
+
+Architectuur: render de scène (kader/zones/title block/wires/connectors/tabellen/tekst) met
+Pillow op 2× mét AA → één `create_image`. Cache de scene-image (signature zoals 6B.2, nu wél
+zinvol want het is één blit). Interactie blijft Tk-overlay: selectie-handles, het versleepte
+object (sluit aan op 6B.4), temp-geometrie, snap-markers. Bij continu zoomen op canvas-scale
+tonen en pas "scherp" renderen na stilstand (~120 ms), om zoom-lag te voorkomen.
+
+| # | Taak | Bestand | Klaar als… | Status |
+|---|------|---------|------------|--------|
+| 7A.1 | POC: AA-techniek + rendertijd bewijzen | `tools/aa_render_poc.py` | kwaliteit + perf bevestigd | ✅ |
+| 7A.2 | `aa_render.py`: scène → AA PIL-image voor gegeven view + modeldata (hergebruik `_render_page_image`) | nieuw | losse, testbare renderfunctie | ⏳ |
+| 7A.3 | Image-laag in `redraw()` i.p.v. wire/connector-Tk-items; cache + invalidatie | `rendering.py` | wires/connectors crisp op scherm | ⏳ |
+| 7A.4 | Interactie-overlays (handles/drag/temp) bovenop de image-laag | `rendering.py` | selectie/slepen werkt als voorheen | ⏳ |
+| 7A.5 | Zoom-settle (scherp na stilstand) + export op dezelfde AA-renderer | main + export | continu zoomen soepel; scherm == deliverable | ⏳ |
+
+### 7B — Echte STEP-import via kernel 🟠
+
+Probleem: de regex-parser mist B-splines, niet-cirkel-edges en surfaces → veel bestanden
+importeren slecht (RingTerminals = 11 segmenten + misleidende noodgreep-diagonaal).
+
+Aanpak: OpenCASCADE-kernel (`OCP`/`cadquery-ocp` of `cascadio`, wheels op PyPI). Laden →
+tessellatie → projecteren naar gekozen vlak → 2D-outline. Graceful fallback naar de huidige
+regex-parser als de kernel ontbreekt (dev/basisfuncties blijven werken).
+
+| # | Taak | Bestand | Klaar als… | Status |
+|---|------|---------|------------|--------|
+| 7B.1 | Kernel kiezen + pip-install valideren (OCP vs cascadio) | `requirements.txt` | importeert in dev | ⏳ |
+| 7B.2 | `step_kernel.py`: STEP → mesh/edges → projectie, achter dezelfde interface als nu | nieuw | RingTerminals komt compleet binnen | ⏳ |
+| 7B.3 | Fallback naar regex-parser als kernel ontbreekt | `step_import.py` | dev zonder kernel blijft werken | ⏳ |
+| 7B.4 | PyInstaller `.spec` + Velopack-build met OCC-binaries (bundle groeit fors) | `.spec`, build | installer draait met kernel | ⏳ |
+
+**Risico:** 7A is een render-laag-herinrichting (visuele regressie → PNG-vergelijking vóór/ná).
+7B vergroot de build/bundle aanzienlijk en de échte test (op connector-STEP's) gebeurt buiten
+dit dev-env, door de maker.
+
+**Volgorde:** 7A.1 ✅ → 7A.2/7A.3 (de zichtbare winst) → 7A.4/7A.5 → 7B parallel zodra de
+kernelkeuze gevalideerd is.
+
+---
+
 ## Aanbevolen uitvoervolgorde
 
 1. **Batch 1** — meeste zichtbare winst, laagste risico.
