@@ -7,6 +7,7 @@ die instantie. Bevat bewust geen state of __init__.
 
 from __future__ import annotations
 
+import json
 import time
 import tkinter as tk
 from pathlib import Path
@@ -16,6 +17,18 @@ from xml.sax.saxutils import escape
 from geometry import clamp
 from model import DimensionLine, WirePath, normalize_wire_style
 
+try:
+    from PIL import ImageTk
+
+    from aa_render import PageImageCache, render_viewport_image
+
+    AA_RENDER_AVAILABLE = True
+except (ImportError, OSError):
+    ImageTk = None
+    PageImageCache = None
+    render_viewport_image = None
+    AA_RENDER_AVAILABLE = False
+
 
 class RenderingMixin:
     def redraw(self):
@@ -24,6 +37,15 @@ class RenderingMixin:
         cv = self.canvas
         cv.delete("all")
         self._canvas_image_refs = []
+
+        # Batch 7A: de volledige statische scène is één anti-aliased bitmap. Alleen
+        # selectiehandles, drag-objecten en tijdelijke geometrie blijven Tk-overlays.
+        if self._draw_aa_scene():
+            self._draw_interaction_overlays()
+            self._draw_temporary_geometry()
+            self._draw_empty_state_overlay()
+            self._record_redraw_time((time.perf_counter() - _perf_t0) * 1000.0)
+            return
 
         # Paper background
         px1, py1 = self.world_to_canvas(0, 0)
@@ -93,6 +115,169 @@ class RenderingMixin:
         self._draw_temporary_geometry()
         self._draw_empty_state_overlay()
         self._record_redraw_time((time.perf_counter() - _perf_t0) * 1000.0)
+
+    def _aa_scene_content_signature(self) -> Tuple:
+        """Modelsignature zonder pan/zoom of selectie; die zijn goedkope overlays."""
+
+        if bool(getattr(self, "_aa_scene_dirty", True)) or getattr(self, "_aa_model_signature", None) is None:
+            data = self._project_dict()
+            data.pop("view", None)
+            payload = json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            self._aa_model_signature = (hash(payload), len(payload))
+            self._aa_scene_dirty = False
+        grid_signature = (
+            bool(self.snap_grid_enabled_var.get()),
+            round(float(self._grid_step_mm()), 4),
+            bool(self.zoom >= 1.2),
+        )
+        drag_filter = getattr(self, "_drag_filter", None)
+        if drag_filter:
+            drag_signature = (drag_filter[0], tuple(sorted(drag_filter[1])))
+        else:
+            drag_signature = None
+        return (self._aa_model_signature, grid_signature, drag_signature)
+
+    def _draw_aa_scene(self) -> bool:
+        if not AA_RENDER_AVAILABLE or ImageTk is None or render_viewport_image is None:
+            return False
+        width = max(1, int(self.canvas.winfo_width()))
+        height = max(1, int(self.canvas.winfo_height()))
+        if width <= 1 or height <= 1:
+            return False
+        try:
+            cache = getattr(self, "_aa_scene_cache", None)
+            if cache is None:
+                cache = PageImageCache()
+                self._aa_scene_cache = cache
+            show_grid = bool(self.zoom >= 1.2)
+            signature = self._aa_scene_content_signature()
+            viewport = render_viewport_image(
+                lambda dpi: self._render_page_image(dpi=dpi, show_grid=show_grid),
+                cache,
+                content_signature=signature,
+                paper_width_mm=self.paper_w_mm,
+                paper_height_mm=self.paper_h_mm,
+                canvas_width_px=width,
+                canvas_height_px=height,
+                zoom_px_per_mm=self.zoom,
+                pan_x_px=self.pan_x,
+                pan_y_px=self.pan_y,
+                background=str(self.canvas.cget("background")),
+                sharp=not bool(getattr(self, "_aa_zoom_preview", False)),
+                supersample=2,
+            )
+            photo = getattr(self, "_aa_viewport_photo", None)
+            if photo is None or getattr(self, "_aa_viewport_pil", None) is not viewport:
+                photo = ImageTk.PhotoImage(viewport)
+                self._aa_viewport_photo = photo
+                self._aa_viewport_pil = viewport
+            self._canvas_image_refs.append(photo)
+            self.canvas.create_image(0, 0, anchor="nw", image=photo, tags=("aa_scene",))
+            self._aa_render_error = ""
+            return True
+        except Exception as exc:
+            # Pillow is optioneel; bij een fout blijft de oude Tk-renderer bruikbaar.
+            self._aa_render_error = str(exc)
+            return False
+
+    def _draw_interaction_overlays(self):
+        """Teken uitsluitend selectie- en reshapehandles boven de AA-scène."""
+
+        primary_wire_id = self.selected[1] if self.selected and self.selected[0] == "wire" else None
+        selected_wire_ids = self._selected_wire_id_set_for_drawing()
+        for wire in self.wires:
+            if wire.wire_id not in selected_wire_ids or self._drag_render_skip("wire", wire.wire_id):
+                continue
+            endpoints = self._wire_endpoints(wire)
+            if endpoints is None:
+                continue
+            for x, y in endpoints:
+                px, py = self.world_to_canvas(x, y)
+                if primary_wire_id == wire.wire_id:
+                    self.canvas.create_oval(px - 6, py - 6, px + 6, py + 6, fill="white", outline="#d61f1f", width=2)
+                    self.canvas.create_oval(px - 2, py - 2, px + 2, py + 2, fill="#d61f1f", outline="")
+                else:
+                    self.canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#d61f1f", outline="")
+            if primary_wire_id == wire.wire_id and self._wire_has_tangent_handles(wire):
+                handles = self._wire_tangent_handle_points(wire)
+                start = self.world_to_canvas(*endpoints[0])
+                end = self.world_to_canvas(*endpoints[1])
+                start_handle = self.world_to_canvas(*handles["start_tangent"])
+                end_handle = self.world_to_canvas(*handles["end_tangent"])
+                self.canvas.create_line(*start, *start_handle, fill="#f08c00", dash=(4, 3), width=1)
+                self.canvas.create_line(*end, *end_handle, fill="#f08c00", dash=(4, 3), width=1)
+                for cx, cy in (start_handle, end_handle):
+                    self.canvas.create_oval(cx - 5, cy - 5, cx + 5, cy + 5, fill="white", outline="#f08c00", width=2)
+                    self.canvas.create_oval(cx - 2, cy - 2, cx + 2, cy + 2, fill="#f08c00", outline="")
+            if primary_wire_id == wire.wire_id and self._wire_has_curve_handle(wire):
+                mid_x = (endpoints[0][0] + endpoints[1][0]) / 2.0
+                mid_y = (endpoints[0][1] + endpoints[1][1]) / 2.0
+                control = self._curve_control_point(wire)
+                midpoint_canvas = self.world_to_canvas(mid_x, mid_y)
+                control_canvas = self.world_to_canvas(*control)
+                self.canvas.create_line(*midpoint_canvas, *control_canvas, fill="#d61f1f", dash=(4, 3), width=1)
+                cx, cy = control_canvas
+                self.canvas.create_oval(cx - 6, cy - 6, cx + 6, cy + 6, fill="white", outline="#d61f1f", width=2)
+                self.canvas.create_oval(cx - 2, cy - 2, cx + 2, cy + 2, fill="#d61f1f", outline="")
+
+        for connector in self.connectors:
+            if not self._is_item_selected("connector", connector.connector_id) or self._drag_render_skip("connector", connector.connector_id):
+                continue
+            bx1, by1, bx2, by2 = self._connector_world_bbox(connector)
+            x1, y1 = self.world_to_canvas(bx1, by1)
+            x2, y2 = self.world_to_canvas(bx2, by2)
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline="#d61f1f", dash=(4, 4), width=2)
+            lbx1, lby1, lbx2, lby2 = self._connector_label_canvas_bbox(connector)
+            self.canvas.create_rectangle(lbx1, lby1, lbx2, lby2, outline="#f08c00", dash=(2, 2), width=1)
+            for pin_label, wx, wy in self._connector_pin_world_points(connector):
+                px, py = self.world_to_canvas(wx, wy)
+                self.canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#1d4ed8", outline="white", width=1)
+                self.canvas.create_text(px + 5, py - 5, text=pin_label, anchor="sw", fill="#1d4ed8", font=("Segoe UI", 7))
+
+        for note in self.image_notes:
+            if self._is_item_selected("image", note.image_id) and not self._drag_render_skip("image", note.image_id):
+                bbox = self._image_note_bbox(note)
+                x1, y1 = self.world_to_canvas(bbox[0], bbox[1])
+                x2, y2 = self.world_to_canvas(bbox[2], bbox[3])
+                self.canvas.create_rectangle(x1, y1, x2, y2, outline="#d61f1f", dash=(4, 4), width=2)
+
+        for note in self.text_notes:
+            if self._is_item_selected("text", note.note_id) and not self._drag_render_skip("text", note.note_id):
+                bbox = self._text_note_bbox(note)
+                x1, y1 = self.world_to_canvas(bbox[0], bbox[1])
+                x2, y2 = self.world_to_canvas(bbox[2], bbox[3])
+                self.canvas.create_rectangle(x1, y1, x2, y2, outline="#d61f1f", dash=(4, 4), width=2)
+
+        for leader in self.leaders:
+            if not self._is_item_selected("leader", leader.leader_id) or self._drag_render_skip("leader", leader.leader_id):
+                continue
+            if not leader.text_box:
+                bbox = self._leader_text_bbox(leader, include_empty=True)
+                if bbox:
+                    x1, y1 = self.world_to_canvas(bbox[0], bbox[1])
+                    x2, y2 = self.world_to_canvas(bbox[2], bbox[3])
+                    self.canvas.create_rectangle(x1, y1, x2, y2, fill="", outline="#d61f1f", dash=(3, 3), width=1)
+            for x, y in (leader.start_mm, leader.end_mm):
+                px, py = self.world_to_canvas(x, y)
+                self.canvas.create_oval(px - 6, py - 6, px + 6, py + 6, fill="white", outline="#d61f1f", width=2)
+                self.canvas.create_oval(px - 2, py - 2, px + 2, py + 2, fill="#d61f1f", outline="")
+
+        for dimension in self.dimensions:
+            if not self._is_item_selected("dimension", dimension.dim_id) or self._drag_render_skip("dimension", dimension.dim_id):
+                continue
+            for point in (dimension.p1_mm, dimension.p2_mm):
+                px, py = self.world_to_canvas(*point)
+                self.canvas.create_oval(px - 6, py - 6, px + 6, py + 6, fill="white", outline="#d61f1f", width=2)
+                self.canvas.create_oval(px - 2, py - 2, px + 2, py + 2, fill="#d61f1f", outline="")
+
+        for table in self.tables:
+            if not self._is_item_selected("table", table.table_id) or self._drag_render_skip("table", table.table_id):
+                continue
+            width = sum(self._table_col_widths(table))
+            height = sum(self._table_row_heights(table))
+            x1, y1 = self.world_to_canvas(table.x_mm, table.y_mm)
+            x2, y2 = self.world_to_canvas(table.x_mm + width, table.y_mm + height)
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline="#d61f1f", dash=(4, 4), width=2)
 
     def _record_redraw_time(self, elapsed_ms: float):
         """Houd de laatste redraw-tijden bij en toon ze als de prestatiemeter aanstaat."""

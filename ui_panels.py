@@ -571,7 +571,7 @@ class UIBuilderMixin:
             self.date_checked_var, self.date_approved_var, self.scale_text_var, self.sheet_var,
             self.unit_var, self.tol_x_var, self.tol_xx_var, self.tol_xxx_var,
         ):
-            _var.trace_add("write", lambda *_a: self.request_redraw())
+            _var.trace_add("write", lambda *_a: self.request_scene_redraw())
 
         files_body = self._create_left_panel_section("files", self.left_panel, 4)
         io = ttk.Frame(files_body)

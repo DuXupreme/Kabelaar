@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -24,6 +24,10 @@ from geometry import (
 @dataclass
 class StepGeometry3D:
     polylines: List[List[Tuple[float, float, float]]]
+    vertices: List[Tuple[float, float, float]] = field(default_factory=list)
+    triangles: List[Tuple[int, int, int]] = field(default_factory=list)
+    backend: str = "regex"
+    warning: str = ""
 
 
 # SI-prefix -> tiende-machtsexponent t.o.v. de basiseenheid (METRE).
@@ -93,7 +97,7 @@ def _arc_from_placement(placements, points, directions, placement_id, radius, p_
     return circle_arc_points_3d(center, z_axis, x_axis, radius, p_start, p_end)
 
 
-def parse_step_geometry(step_path: Path) -> StepGeometry3D:
+def _parse_step_geometry_regex(step_path: Path) -> StepGeometry3D:
     text = step_path.read_text(encoding="utf-8", errors="ignore")
     number = r"[+-]?\d+(?:\.\d+)?(?:[Ee][+-]?\d+)?"
 
@@ -197,16 +201,55 @@ def parse_step_geometry(step_path: Path) -> StepGeometry3D:
 
     compact_lines = [[(a[0], a[1], a[2]), (b[0], b[1], b[2])] for a, b in dedup.keys()]
     if compact_lines:
-        return StepGeometry3D(polylines=compact_lines)
-    return StepGeometry3D(polylines=polylines_3d)
+        return StepGeometry3D(polylines=compact_lines, backend="regex")
+    return StepGeometry3D(polylines=polylines_3d, backend="regex")
+
+
+def parse_step_geometry(step_path: Path, prefer_kernel: bool = True) -> StepGeometry3D:
+    """Lees STEP via OpenCASCADE en val bij afwezigheid/fout terug op regex.
+
+    De fallback is bewust breed: een corrupte of door de kernel niet ondersteunde
+    STEP-variant mag de bestaande basisimport niet uitschakelen.
+    """
+
+    kernel_warning = ""
+    if prefer_kernel:
+        try:
+            from step_kernel import feature_polylines, load_step_mesh
+
+            mesh = load_step_mesh(Path(step_path))
+            return StepGeometry3D(
+                polylines=feature_polylines(mesh),
+                vertices=mesh.vertices,
+                triangles=mesh.triangles,
+                backend="OpenCASCADE",
+            )
+        except Exception as exc:
+            kernel_warning = str(exc)
+
+    geometry = _parse_step_geometry_regex(Path(step_path))
+    geometry.warning = kernel_warning
+    return geometry
 
 
 def project_step_geometry(geometry: StepGeometry3D, projection: str) -> Tuple[List[List[Tuple[float, float]]], float, float]:
     polylines_2d: List[List[Tuple[float, float]]] = []
-    for line in geometry.polylines:
-        projected = [project_xyz(x, y, z, projection) for x, y, z in line]
-        if len(projected) >= 2:
-            polylines_2d.append(projected)
+    if geometry.vertices and geometry.triangles:
+        try:
+            from step_kernel import StepMesh, project_mesh_outline
+
+            polylines_2d = project_mesh_outline(
+                StepMesh(vertices=geometry.vertices, triangles=geometry.triangles),
+                projection,
+            )
+        except Exception:
+            polylines_2d = []
+
+    if not polylines_2d:
+        for line in geometry.polylines:
+            projected = [project_xyz(x, y, z, projection) for x, y, z in line]
+            if len(projected) >= 2:
+                polylines_2d.append(projected)
 
     if not polylines_2d:
         polylines_2d = [[(0.0, 0.0), (20.0, 0.0), (20.0, 10.0), (0.0, 10.0), (0.0, 0.0)]]

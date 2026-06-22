@@ -567,6 +567,14 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._image_canvas_cache: Dict[str, dict] = {}
         self._canvas_image_refs: List[object] = []
         self._pil_font_cache: Dict[Tuple[int, bool], object] = {}
+        self._aa_scene_cache = None
+        self._aa_scene_dirty = True
+        self._aa_model_signature = None
+        self._aa_viewport_photo = None
+        self._aa_viewport_pil = None
+        self._aa_zoom_preview = False
+        self._aa_zoom_settle_after_id = None
+        self._aa_render_error = ""
         self._redraw_interval_ms = 16
         self._redraw_scheduled = False
         self._redraw_after_id = None
@@ -1405,7 +1413,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._pil_font_cache[key] = font
         return font
 
-    def _render_page_image(self, dpi: int = 180):
+    def _render_page_image(self, dpi: int = 180, show_grid: bool = True):
         if not PIL_AVAILABLE or Image is None or ImageDraw is None:
             raise RuntimeError("PNG/PDF export vereist Pillow op deze machine.")
 
@@ -1486,18 +1494,19 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         for t in zone["texts"]:
             draw_anchored_text(mm_to_px_x(t["x"]), mm_to_px_y(t["y"]), t["text"], zone["color"], zone_font, anchor="mm")
 
-        grid_mm = self._grid_step_mm() if self.snap_grid_enabled_var.get() else 10.0
-        grid_mm = max(1.0, grid_mm)
-        x = f
-        while x <= self.paper_w_mm - f + 1e-6:
-            px = mm_to_px_x(x)
-            draw.line([(px, fy1), (px, fy2)], fill=grid_color, width=1)
-            x += grid_mm
-        y = f
-        while y <= self.paper_h_mm - f + 1e-6:
-            py = mm_to_px_y(y)
-            draw.line([(fx1, py), (fx2, py)], fill=grid_color, width=1)
-            y += grid_mm
+        if show_grid:
+            grid_mm = self._grid_step_mm() if self.snap_grid_enabled_var.get() else 10.0
+            grid_mm = max(1.0, grid_mm)
+            x = f
+            while x <= self.paper_w_mm - f + 1e-6:
+                px = mm_to_px_x(x)
+                draw.line([(px, fy1), (px, fy2)], fill=grid_color, width=1)
+                x += grid_mm
+            y = f
+            while y <= self.paper_h_mm - f + 1e-6:
+                py = mm_to_px_y(y)
+                draw.line([(fx1, py), (fx2, py)], fill=grid_color, width=1)
+                y += grid_mm
 
         title_block = self._title_block_drawing()
         tb_x1, tb_y1, tb_x2, tb_y2 = title_block["rect"]
@@ -1514,6 +1523,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         font_table = self._pil_font(8 * dpi / 72.0)
 
         for note in self.image_notes:
+            if self._drag_render_skip("image", note.image_id):
+                continue
             image_bytes = self._image_note_bytes(note)
             if not image_bytes:
                 continue
@@ -1529,6 +1540,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 continue
 
         for c in self.connectors:
+            if self._drag_render_skip("connector", c.connector_id):
+                continue
             world_polylines, bbox = self._connector_world_geometry(c)
             stroke_w = mm_width_to_px(c.line_width_mm, scale=0.4)
             for poly in world_polylines:
@@ -1537,6 +1550,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
 
         bridge_specs = self._wire_bridge_specs()
         for w in self.wires:
+            if self._drag_render_skip("wire", w.wire_id):
+                continue
             stroke_w = mm_width_to_px(w.width_mm, scale=0.4)
             wire_bridges = bridge_specs.get(w.wire_id, [])
             if wire_bridges and self._wire_supports_bridge(w):
@@ -1558,6 +1573,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 draw_anchored_text(mm_to_px_x(mx + 1.2), mm_to_px_y(my - 1.2), w.label, "#1f2937", font_wire, anchor="sw")
 
         for l in self.leaders:
+            if self._drag_render_skip("leader", l.leader_id):
+                continue
             stroke_w = mm_width_to_px(l.width_mm, scale=0.4)
             draw_polyline(self._leader_polyline(l), l.color, stroke_w)
             draw.polygon([mm_point_to_px(point) for point in self._leader_arrow_points(l)], fill=l.color, outline=l.color)
@@ -1575,6 +1592,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 draw_anchored_text(mm_to_px_x(bx1 + 1.2), mm_to_px_y(by1 + 0.9), l.text, l.color, leader_font, anchor="nw")
 
         for dim in self.dimensions:
+            if self._drag_render_skip("dimension", dim.dim_id):
+                continue
             geo = self._dimension_geometry(dim)
             dim_stroke = mm_width_to_px(dim.line_width_mm, scale=0.4)
             draw_polyline([geo["feet"][0], geo["feet"][1]], dim.color, dim_stroke)
@@ -1586,6 +1605,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             draw_anchored_text(mm_to_px_x(geo["text_pos"][0]), mm_to_px_y(geo["text_pos"][1]), geo["text"], dim.color, dim_font, anchor="mm")
 
         for t in self.tables:
+            if self._drag_render_skip("table", t.table_id):
+                continue
             widths = self._table_col_widths(t)
             heights = self._table_row_heights(t)
             tw = sum(widths)
@@ -1616,6 +1637,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                     draw_anchored_text(mm_to_px_x(tx), mm_to_px_y(ty), txt, "#1f2937", font_table, anchor=anchor, spacing_px=2)
 
         for note in self.text_notes:
+            if self._drag_render_skip("text", note.note_id):
+                continue
             draw_anchored_text(mm_to_px_x(note.x_mm), mm_to_px_y(note.y_mm), note.text, note.color, self._pil_font(note.font_size_pt * dpi / 72.0), anchor="nw", spacing_px=max(2, int(round(dpi / 90))))
 
         return image
@@ -1871,6 +1894,15 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._redraw_scheduled = True
         self._redraw_after_id = self.after(self._redraw_interval_ms, self._flush_redraw)
 
+    def _invalidate_aa_scene(self):
+        self._aa_scene_dirty = True
+
+    def request_scene_redraw(self):
+        """Plan een redraw nadat model- of titelblokinhoud is gewijzigd."""
+
+        self._invalidate_aa_scene()
+        self.request_redraw()
+
     def _flush_redraw(self):
         self._redraw_scheduled = False
         self._redraw_after_id = None
@@ -1997,6 +2029,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             self.destroy()
 
     def _capture_before_change(self) -> Optional[str]:
+        self._invalidate_aa_scene()
         if self._history_replaying:
             return None
         return self._snapshot_project()
@@ -2679,6 +2712,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             self.status(f"Eindpunt slepen: {label}.")
 
     def _clear_connector_caches(self):
+        self._invalidate_aa_scene()
         self._connector_world_cache.clear()
         self._connector_canvas_cache.clear()
         self._connector_local_cache.clear()
@@ -2688,6 +2722,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._canvas_image_refs = []
 
     def _clear_wire_geometry_caches(self):
+        self._invalidate_aa_scene()
         self._wire_centerline_cache.clear()
         self._wire_polyline_cache.clear()
         self._wire_bridge_signature = None
@@ -3818,7 +3853,9 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             self.active_symbol = name
             self._persist_symbol_to_library(self.symbols[name])
             self._refresh_symbol_list(select_name=name)
-            self.status(f"STEP geïmporteerd ({projection}): {step_path.name}")
+            backend = geometry.backend or "regex"
+            fallback_note = f"; fallback: {geometry.warning}" if geometry.warning and backend == "regex" else ""
+            self.status(f"STEP geïmporteerd via {backend} ({projection}): {step_path.name}{fallback_note}")
             self.set_mode("place_connector")
             self._commit_change(before)
         except Exception as exc:
@@ -3941,15 +3978,33 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
 
     def zoom_by(self, factor: float):
         old_zoom = self.zoom
-        self.zoom = clamp(self.zoom * factor, 0.3, 8.0)
-        if abs(self.zoom - old_zoom) < 1e-9:
-            return
         cx = self.canvas.winfo_width() / 2.0
         cy = self.canvas.winfo_height() / 2.0
         wx, wy = self.canvas_to_world(cx, cy)
+        self.zoom = clamp(self.zoom * factor, 0.3, 8.0)
+        if abs(self.zoom - old_zoom) < 1e-9:
+            return
         self.pan_x = cx - wx * self.zoom
         self.pan_y = cy - wy * self.zoom
+        self._redraw_zoom_preview()
+
+    def _redraw_zoom_preview(self):
+        """Toon direct een gecachete zoom-preview en render na 120 ms scherp."""
+
+        self._aa_zoom_preview = True
+        if self._aa_zoom_settle_after_id is not None:
+            try:
+                self.after_cancel(self._aa_zoom_settle_after_id)
+            except tk.TclError:
+                pass
         self.redraw()
+        self._aa_zoom_settle_after_id = self.after(120, self._finish_aa_zoom_settle)
+
+    def _finish_aa_zoom_settle(self):
+        self._aa_zoom_settle_after_id = None
+        self._aa_zoom_preview = False
+        if self.canvas.winfo_exists():
+            self.redraw()
 
     def _is_shift_pressed(self, event) -> bool:
         return bool(event.state & 0x0001)
@@ -6658,10 +6713,13 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
     def on_mouse_wheel(self, event):
         factor = 1.1 if event.delta > 0 else 1 / 1.1
         wx, wy = self.canvas_to_world(event.x, event.y)
+        old_zoom = self.zoom
         self.zoom = clamp(self.zoom * factor, 0.3, 8.0)
+        if abs(self.zoom - old_zoom) < 1e-9:
+            return
         self.pan_x = event.x - wx * self.zoom
         self.pan_y = event.y - wy * self.zoom
-        self.redraw()
+        self._redraw_zoom_preview()
 
     def on_motion(self, event):
         world = self.canvas_to_world(event.x, event.y)

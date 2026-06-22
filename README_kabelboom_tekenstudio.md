@@ -10,9 +10,10 @@ Interactieve tekenapp voor kabelboom-werkbladen.
   - Blokken bewaren connectors (incl. STEP-symbool), draden, leaders, maatlijnen, tabellen en tekst
   - Nieuwe ID's en interne referenties worden automatisch hernummerd bij invoegen
   - Beheer via het paneel "Bibliotheek", het menu `Tools`, of rechtermuisknop op een selectie
-- STEP connectorbestand inladen met **3D wireframe preview**
-  - Eenheden (mm/cm/m en inch/foot) worden uit het STEP-bestand gelezen en naar mm omgerekend
-  - Cirkel-/boog-randen worden getesselleerd, zodat ronde contouren zichtbaar zijn
+- STEP connectorbestand inladen met **OpenCASCADE-tessellatie en 3D-preview**
+  - Solids, surfaces, B-splines en niet-cirkelvormige edges worden als mesh ingelezen en naar een zuivere 2D-outline geprojecteerd
+  - Eenheden (mm/cm/m en inch/foot) worden door de kernel naar mm omgerekend
+  - Zonder kernel valt de app automatisch terug op de bestaande regex-import voor basisgeometrie
 - In de preview kun je het model roteren en daarna projectiezijde kiezen:
   - `Top (XY)`, `Bottom (XY)`, `Front (XZ)`, `Back (XZ)`, `Left (YZ)`, `Right (YZ)`
 - Connectoren plaatsen en verplaatsen op het blad
@@ -45,6 +46,7 @@ Interactieve tekenapp voor kabelboom-werkbladen.
   - Tabelacties: rijen/kolommen invoegen/verwijderen + tekstuitlijning
 - Opslaan/openen als JSON
 - Projectinstellingen/default stijlen en view/snap-voorkeuren worden mee opgeslagen
+- Anti-aliased schermweergave via een gecachete Pillow-scène; selectiehandles en slepen blijven interactieve overlays
 - Exporteren naar SVG
 - Exporteren naar netlist CSV en BOM CSV vanuit draadmetadata
 - Menubalk met engineering-acties (`Bestand`, `Bewerken`, `Beeld`, `Tools`)
@@ -94,10 +96,11 @@ Gebruik Python 3.10 of nieuwer. Installeer de afhankelijkheden:
 python -m pip install -r requirements.txt
 ```
 
-`Pillow` is nodig voor afbeeldingimport en PNG/PDF-export. `sv-ttk` levert het
-moderne licht/donker-thema (Windows 11-stijl); ontbreekt het pakket, dan valt de
-app terug op het standaard ttk-thema. De basisfuncties blijven grotendeels werken
-zonder extra pakketten.
+`Pillow` verzorgt de anti-aliased schermweergave, afbeeldingimport en PNG/PDF-export.
+`cascadio` levert de compacte OpenCASCADE-kernel voor volledige STEP-tessellatie;
+zonder dit pakket blijft de regex-fallback beschikbaar. `sv-ttk` levert het moderne
+licht/donker-thema (Windows 11-stijl); ontbreekt het pakket, dan valt de app terug op
+het standaard ttk-thema.
 
 Tests draaien:
 

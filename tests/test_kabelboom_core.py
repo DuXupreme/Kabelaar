@@ -54,6 +54,9 @@ from model import is_standard_cross_section, STANDARD_CROSS_SECTIONS_MM2
 from project_io import write_text_atomic
 import app_settings
 from ui_scaling import UI_SCALE_LABELS, normalize_ui_scale_percent
+from aa_render import PageImageCache, render_viewport_image, screen_render_dpi
+from step_kernel import StepMesh, parse_obj_mesh, project_mesh_outline
+from PIL import Image
 
 
 class DummyVar:
@@ -535,7 +538,7 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
             step_path = Path(tmp) / "connector.step"
             step_path.write_text(step_text, encoding="utf-8")
 
-            geometry = parse_step_geometry(step_path)
+            geometry = parse_step_geometry(step_path, prefer_kernel=False)
 
         self.assertEqual(len(geometry.polylines), 1)
         self.assertEqual(len(geometry.polylines[0]), 2)
@@ -577,7 +580,7 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             step_path = Path(tmp) / "metre.step"
             step_path.write_text(step_text, encoding="utf-8")
-            geometry = parse_step_geometry(step_path)
+            geometry = parse_step_geometry(step_path, prefer_kernel=False)
 
         # 0.02 m / 0.01 m -> 20 mm / 10 mm
         _polylines, width, height = project_step_geometry(geometry, "Top (XY)")
@@ -601,7 +604,7 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             step_path = Path(tmp) / "arc.step"
             step_path.write_text(step_text, encoding="utf-8")
-            geometry = parse_step_geometry(step_path)
+            geometry = parse_step_geometry(step_path, prefer_kernel=False)
 
         unique_points = {pt for line in geometry.polylines for pt in line}
         # Een rechte koorde zou maar 2 punten geven; een boog levert er meer.
@@ -618,6 +621,94 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
         self.assertGreater(len(pts), 8)
         for x, y, _z in pts:
             self.assertAlmostEqual(math.hypot(x, y), 5.0, places=6)
+
+
+class Batch7RenderingAndKernelTest(unittest.TestCase):
+    def test_aa_viewport_reuses_cached_page_until_content_changes(self):
+        calls = []
+
+        def render_page(dpi):
+            calls.append(dpi)
+            return Image.new("RGBA", (200, 100), "white")
+
+        cache = PageImageCache()
+        first = render_viewport_image(
+            render_page,
+            cache,
+            content_signature="scene-a",
+            paper_width_mm=20.0,
+            paper_height_mm=10.0,
+            canvas_width_px=100,
+            canvas_height_px=70,
+            zoom_px_per_mm=4.0,
+            pan_x_px=10.0,
+            pan_y_px=5.0,
+        )
+        second = render_viewport_image(
+            render_page,
+            cache,
+            content_signature="scene-a",
+            paper_width_mm=20.0,
+            paper_height_mm=10.0,
+            canvas_width_px=100,
+            canvas_height_px=70,
+            zoom_px_per_mm=4.0,
+            pan_x_px=20.0,
+            pan_y_px=5.0,
+            sharp=False,
+        )
+        render_viewport_image(
+            render_page,
+            cache,
+            content_signature="scene-b",
+            paper_width_mm=20.0,
+            paper_height_mm=10.0,
+            canvas_width_px=100,
+            canvas_height_px=70,
+            zoom_px_per_mm=4.0,
+            pan_x_px=20.0,
+            pan_y_px=5.0,
+        )
+
+        self.assertEqual(first.size, (100, 70))
+        self.assertEqual(second.size, (100, 70))
+        self.assertEqual(len(calls), 2)
+        self.assertGreaterEqual(screen_render_dpi(420.0, 297.0, 2.5), 72.0)
+
+    def test_obj_parser_triangulates_faces(self):
+        obj_text = "\n".join(
+            [
+                "v 0 0 0",
+                "v 10 0 0",
+                "v 10 5 0",
+                "v 0 5 0",
+                "f 1 2 3 4",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "mesh.obj"
+            path.write_text(obj_text, encoding="utf-8")
+            mesh = parse_obj_mesh(path)
+
+        self.assertEqual(len(mesh.vertices), 4)
+        self.assertEqual(mesh.triangles, [(0, 1, 2), (0, 2, 3)])
+
+    def test_kernel_mesh_projection_returns_cube_outline_without_face_diagonals(self):
+        vertices = [
+            (0.0, 0.0, 0.0), (10.0, 0.0, 0.0), (10.0, 20.0, 0.0), (0.0, 20.0, 0.0),
+            (0.0, 0.0, 5.0), (10.0, 0.0, 5.0), (10.0, 20.0, 5.0), (0.0, 20.0, 5.0),
+        ]
+        triangles = [
+            (0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7),
+            (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5),
+            (2, 3, 7), (2, 7, 6), (3, 0, 4), (3, 4, 7),
+        ]
+
+        outline = project_mesh_outline(StepMesh(vertices, triangles), "Top (XY)")
+        points = {point for line in outline for point in line}
+
+        self.assertEqual(points, {(0.0, 0.0), (10.0, 0.0), (10.0, 20.0), (0.0, 20.0)})
+        self.assertEqual(len(outline), 4)
 
 
 class ProjectIoTest(unittest.TestCase):

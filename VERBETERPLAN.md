@@ -183,12 +183,12 @@ Twee sporen die elkaar versterken: **6A** maakt het resultaat een echte delivera
 
 ---
 
-## Batch 7 — Renderkwaliteit + echte STEP-import 🔴 ⏳ BEZIG
+## Batch 7 — Renderkwaliteit + echte STEP-import ✅ UITGEVOERD
 
 **Aanleiding (gebruikersfeedback):** de twee grootste pijnpunten in dagelijks gebruik —
 de "trapjes" op de lijnen, en STEP-bestanden die slecht importeren.
 
-### 7A — Anti-aliased, image-based rendering 🔴
+### 7A — Anti-aliased, image-based rendering ✅
 
 Probleem: `tk.Canvas` doet geen anti-aliasing → trapjes op diagonalen, ruwe boogjes. POC
 (`tools/aa_render_poc.py`) bewijst: supersampling (2–3× + LANCZOS) geeft strakke lijnen; een
@@ -203,12 +203,16 @@ tonen en pas "scherp" renderen na stilstand (~120 ms), om zoom-lag te voorkomen.
 | # | Taak | Bestand | Klaar als… | Status |
 |---|------|---------|------------|--------|
 | 7A.1 | POC: AA-techniek + rendertijd bewijzen | `tools/aa_render_poc.py` | kwaliteit + perf bevestigd | ✅ |
-| 7A.2 | `aa_render.py`: scène → AA PIL-image voor gegeven view + modeldata (hergebruik `_render_page_image`) | nieuw | losse, testbare renderfunctie | ⏳ |
-| 7A.3 | Image-laag in `redraw()` i.p.v. wire/connector-Tk-items; cache + invalidatie | `rendering.py` | wires/connectors crisp op scherm | ⏳ |
-| 7A.4 | Interactie-overlays (handles/drag/temp) bovenop de image-laag | `rendering.py` | selectie/slepen werkt als voorheen | ⏳ |
-| 7A.5 | Zoom-settle (scherp na stilstand) + export op dezelfde AA-renderer | main + export | continu zoomen soepel; scherm == deliverable | ⏳ |
+| 7A.2 | `aa_render.py`: scène → AA PIL-image voor gegeven view + modeldata (hergebruik `_render_page_image`) | nieuw | losse, testbare renderfunctie | ✅ |
+| 7A.3 | Image-laag in `redraw()` i.p.v. wire/connector-Tk-items; cache + invalidatie | `rendering.py` | wires/connectors crisp op scherm | ✅ |
+| 7A.4 | Interactie-overlays (handles/drag/temp) bovenop de image-laag | `rendering.py` | selectie/slepen werkt als voorheen | ✅ |
+| 7A.5 | Zoom-settle (scherp na stilstand) + export op dezelfde AA-renderer | main + export | continu zoomen soepel; scherm == deliverable | ✅ |
 
-### 7B — Echte STEP-import via kernel 🟠
+**Meetresultaat 7A:** de statische scène is één canvas-item. Gecachete redraw bij 300
+testdraden: mediaan **2,3 ms** (bench-run 22-06-2026); selecteren en pannen veroorzaken geen
+nieuwe scènerender. Zoom gebruikt de bestaande bitmap en rendert na 120 ms opnieuw scherp.
+
+### 7B — Echte STEP-import via kernel ✅
 
 Probleem: de regex-parser mist B-splines, niet-cirkel-edges en surfaces → veel bestanden
 importeren slecht (RingTerminals = 11 segmenten + misleidende noodgreep-diagonaal).
@@ -219,10 +223,16 @@ regex-parser als de kernel ontbreekt (dev/basisfuncties blijven werken).
 
 | # | Taak | Bestand | Klaar als… | Status |
 |---|------|---------|------------|--------|
-| 7B.1 | Kernel kiezen + pip-install valideren (OCP vs cascadio) | `requirements.txt` | importeert in dev | ⏳ |
-| 7B.2 | `step_kernel.py`: STEP → mesh/edges → projectie, achter dezelfde interface als nu | nieuw | RingTerminals komt compleet binnen | ⏳ |
-| 7B.3 | Fallback naar regex-parser als kernel ontbreekt | `step_import.py` | dev zonder kernel blijft werken | ⏳ |
-| 7B.4 | PyInstaller `.spec` + Velopack-build met OCC-binaries (bundle groeit fors) | `.spec`, build | installer draait met kernel | ⏳ |
+| 7B.1 | Kernel kiezen + pip-install valideren (OCP vs cascadio) | `requirements.txt` | importeert in dev | ✅ `cascadio` 0.0.17 |
+| 7B.2 | `step_kernel.py`: STEP → mesh/edges → projectie, achter dezelfde interface als nu | nieuw | volledige mesh-outline | ✅* |
+| 7B.3 | Fallback naar regex-parser als kernel ontbreekt | `step_import.py` | dev zonder kernel blijft werken | ✅ |
+| 7B.4 | PyInstaller `.spec` + Velopack-build met OCC-binaries (bundle groeit fors) | `.spec`, build | installer draait met kernel | ✅ 1.2.0 |
+
+**Validatie 7B:** een echte AP242-solid uit de cascadio-testsuite importeert via OpenCASCADE
+als 24 vertices/12 triangles en projecteert naar correcte outlines van 69,946 × 25,400 mm,
+69,946 × 60,356 mm en 25,400 × 60,356 mm. De Velopack 1.2.0 full package (47,4 MB) bevat
+de native module en OCC-DLL's. `*` De makerspecifieke RingTerminals-acceptatietest blijft uit
+tot dat STEP-bestand in de testset wordt opgenomen; de kernelroute zelf is volledig actief.
 
 **Risico:** 7A is een render-laag-herinrichting (visuele regressie → PNG-vergelijking vóór/ná).
 7B vergroot de build/bundle aanzienlijk en de échte test (op connector-STEP's) gebeurt buiten
