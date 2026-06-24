@@ -24,46 +24,46 @@ De sleutels vormen een klein design-system dat `warm_theme.py` verbruikt:
 
 from __future__ import annotations
 
-# --- Klei & inkt, warm daglicht -------------------------------------------
+# --- Klei & inkt, warm daglicht (licht & luchtig) -------------------------
 LIGHT = {
-    # Oppervlakken
-    "app_bg": "#F3ECE0",        # venster + zijpaneel (warm zand)
-    "surface": "#FBF6EC",       # knoppen / kaarten (cremewit)
-    "surface_alt": "#F0E6D6",   # subtiele hover-baan / koppen
-    "surface_active": "#EADFCC",
-    "canvas_bg": "#E7DECF",     # tekenmat achter het witte blad (warm taupe)
-    # Typografie
+    # Oppervlakken - lichter, richting crème/wit met subtiele warmte
+    "app_bg": "#FAF5EC",        # venster + zijpaneel (licht warm crème)
+    "surface": "#FFFDF9",       # knoppen / kaarten (vrijwel wit, warm)
+    "surface_alt": "#F4ECDE",   # subtiele hover-baan / koppen
+    "surface_active": "#ECE3D3",
+    "canvas_bg": "#ECE5D8",     # tekenmat achter het witte blad (licht taupe)
+    # Typografie - iets donkerder voor duidelijker contrast op lichte vlakken
     "text": "#2A2520",          # diepe inkt
-    "subtle_fg": "#6E6253",     # gedempt taupe-grijs
-    "status_fg": "#4C4234",
-    "header_fg": "#3A3024",     # serif-koppen / wordmerk
-    # Randen
-    "border": "#E2D7C4",
-    "border_strong": "#CCBCA1",
+    "subtle_fg": "#675C4D",     # gedempt taupe-grijs
+    "status_fg": "#473D30",
+    "header_fg": "#33291E",     # koppen / wordmerk
+    # Randen - zachter en lichter
+    "border": "#EADFCE",
+    "border_strong": "#D6C6AC",
     # Velden
-    "field_bg": "#FFFCF6",
-    "field_border": "#D8CBB4",
+    "field_bg": "#FFFFFF",
+    "field_border": "#DCCFB9",
     # Accent (klei)
     "accent": "#C2674A",
     "accent_hover": "#B0573B",
     "accent_active": "#9C4A30",
     "accent_fg": "#FFF7EF",
-    "accent_soft": "#EFD9CC",
+    "accent_soft": "#F1DDD0",
     # Selectie
     "selection_bg": "#C2674A",
     "selection_fg": "#FFF7EF",
     # Sleepgreep
-    "grip": "#DCD0BC",
+    "grip": "#E4D9C7",
     "grip_active": "#C2674A",
     # Uitgeschakeld
-    "disabled_fg": "#B2A78F",
-    "disabled_bg": "#EEE7DA",
+    "disabled_fg": "#B6AB95",
+    "disabled_bg": "#F2EBDE",
     # Schuifbalken
-    "scrollbar": "#EBE2D2",
-    "scrollbar_thumb": "#D4C6AE",
-    "scrollbar_active": "#BFAD90",
+    "scrollbar": "#F0E7D8",
+    "scrollbar_thumb": "#DBCEB8",
+    "scrollbar_active": "#C6B498",
     # Menu's
-    "menu_bg": "#FBF6EC",
+    "menu_bg": "#FFFDF9",
     "menu_fg": "#2A2520",
     "menu_active_bg": "#C2674A",
     "menu_active_fg": "#FFF7EF",

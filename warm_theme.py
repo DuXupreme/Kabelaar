@@ -27,7 +27,7 @@ import theme as ui_theme
 # beschikbaar is wint. Allemaal warm/humanistisch i.p.v. generiek. De hele UI
 # gebruikt bewust één familie (koppen/body/cijfers), alleen grootte en gewicht
 # variëren.
-UI_FONT_CANDIDATES = ("Corbel", "Segoe UI Variable Text", "Candara", "Segoe UI", "Calibri")
+UI_FONT_CANDIDATES = ("Segoe UI Variable Text", "Segoe UI Variable", "Corbel", "Segoe UI", "Calibri")
 
 # Named fonts die de UI-letter (face) moeten volgen. Maten worden elders
 # geschaald; hier zetten we alleen de familie.
@@ -182,8 +182,8 @@ def configure_ttk(style: ttk.Style, t: dict, fonts: dict):
         focuscolor=t["app_bg"],
         relief="flat",
         anchor="w",
-        padding=(2, 7),
-        font=(heading, 12),
+        padding=(2, 8),
+        font=(heading, 13, "bold"),
     )
     style.map(
         "PanelHeader.TButton",

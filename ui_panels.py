@@ -239,6 +239,7 @@ class UIBuilderMixin:
                 self.side_panel_resize_grip.grid_remove()
         if hasattr(self, "left_panel_canvas"):
             self.after_idle(self._update_left_panel_scrollregion)
+        self._update_wrap_labels(width)
         if persist:
             self._save_settings(side_panel_width_px=width)
 
@@ -377,9 +378,31 @@ class UIBuilderMixin:
         self._apply_panel_layout()
         self.status("Alle panelen ingeklapt.")
 
+    def _register_wrap_label(self, label, extra: int = 24):
+        """Laat een label meebuigen met de paneelbreedte i.p.v. af te kappen.
+
+        ``extra`` is de ruimte (px) die naast het label in dezelfde rij staat
+        (bijv. knoppen of een naamkolom), zodat de afbreeklengte klopt.
+        """
+        if not hasattr(self, "_wrap_labels"):
+            self._wrap_labels = []
+        self._wrap_labels.append((label, extra))
+        try:
+            label.configure(wraplength=max(120, self._side_panel_width() - extra))
+        except tk.TclError:
+            pass
+
+    def _update_wrap_labels(self, width):
+        for label, extra in getattr(self, "_wrap_labels", ()):
+            try:
+                label.configure(wraplength=max(120, int(width) - extra))
+            except tk.TclError:
+                pass
+
     def _panel_note(self, parent, text: str, row: int, columnspan: int = 1):
-        label = ttk.Label(parent, text=text, style="Subtle.TLabel", wraplength=max(140, self._side_panel_width() - 36))
+        label = ttk.Label(parent, text=text, style="Subtle.TLabel", justify="left")
         label.grid(row=row, column=0, columnspan=columnspan, sticky="ew", pady=(0, 6))
+        self._register_wrap_label(label, extra=36)
         return label
 
     def _make_mode_button(self, parent, mode: str, text: str, row: int, column: int, **grid_options):
@@ -430,12 +453,16 @@ class UIBuilderMixin:
         side_header = ttk.Frame(left)
         side_header.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         side_header.columnconfigure(0, weight=1)
-        ttk.Label(side_header, text="Kabelboom studio", style="Status.TLabel").grid(row=0, column=0, sticky="w")
+        # Wordmerk op een eigen regel (volle breedte) zodat het nooit afkapt;
+        # de bedieningsknoppen staan rechts op de regel eronder.
+        wordmark = ttk.Label(side_header, text="Kabelboom studio", style="Status.TLabel", anchor="w")
+        wordmark.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 4))
+        self._register_wrap_label(wordmark, extra=12)
         expand_all_btn = ttk.Button(side_header, text="Alles", width=6, command=self.expand_all_panels)
-        expand_all_btn.grid(row=0, column=1, sticky="e", padx=(4, 0))
+        expand_all_btn.grid(row=1, column=1, sticky="e", padx=(4, 0))
         attach_tooltip(expand_all_btn, "Alle panelen uitklappen")
         hide_side_btn = ttk.Button(side_header, text="<<", width=3, command=lambda: self.set_side_panel_visible(False))
-        hide_side_btn.grid(row=0, column=2, sticky="e", padx=(4, 0))
+        hide_side_btn.grid(row=1, column=2, sticky="e", padx=(4, 0))
         attach_tooltip(hide_side_btn, "Zijpaneel verbergen")
         left.bind("<Button-3>", self._show_panel_context_menu, add="+")
         side_header.bind("<Button-3>", self._show_panel_context_menu, add="+")
@@ -615,9 +642,9 @@ class UIBuilderMixin:
 
         properties_body = self._create_left_panel_section("properties", self.left_panel, 1)
         self.property_hint_var = tk.StringVar(value="Selecteer iets of kies een tekenmodus; alleen relevante velden blijven zichtbaar.")
-        ttk.Label(properties_body, textvariable=self.property_hint_var, style="Subtle.TLabel", wraplength=260).grid(
-            row=0, column=0, sticky="ew", pady=(0, 6)
-        )
+        property_hint_lbl = ttk.Label(properties_body, textvariable=self.property_hint_var, style="Subtle.TLabel", justify="left")
+        property_hint_lbl.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self._register_wrap_label(property_hint_lbl, extra=28)
         props = ttk.Frame(properties_body)
         self.properties_frame = props
         props.grid(row=1, column=0, sticky="ew")
@@ -697,8 +724,9 @@ class UIBuilderMixin:
 
         # Objectkop (altijd zichtbaar): naam-label of bewerkbaar connector-ID-veld.
         ttk.Label(props, text="Object").grid(row=0, column=0, sticky="w")
-        self.prop_target_lbl = ttk.Label(props, textvariable=self.prop_target_var)
-        self.prop_target_lbl.grid(row=0, column=1, sticky="w")
+        self.prop_target_lbl = ttk.Label(props, textvariable=self.prop_target_var, justify="left")
+        self.prop_target_lbl.grid(row=0, column=1, sticky="ew")
+        self._register_wrap_label(self.prop_target_lbl, extra=70)
         self.prop_connector_id_entry = ttk.Entry(props, textvariable=self.prop_connector_id_var)
         self.prop_connector_id_entry.grid(row=0, column=1, sticky="ew", padx=(4, 0))
         self.prop_connector_id_entry.bind("<Return>", lambda _e: self._rename_selected_connector())
@@ -845,14 +873,15 @@ class UIBuilderMixin:
         add_field(dim_block, 27, "Tolerantie", self.prop_dim_tolerance_entry, label_widget=self.prop_dim_tolerance_label)
 
         # Acties (altijd zichtbaar onderaan).
+        # Gestapeld op volle breedte: lange labels worden nooit afgekapt,
+        # ook niet bij een smal paneel of lagere UI-schaal.
         actions = ttk.Frame(props)
-        actions.grid(row=len(self._property_blocks) + 2, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        actions.grid(row=len(self._property_blocks) + 2, column=0, columnspan=2, sticky="ew", pady=(10, 0))
         actions.columnconfigure(0, weight=1)
-        actions.columnconfigure(1, weight=1)
-        self.prop_apply_btn = ttk.Button(actions, text="Toepassen op selectie", command=self.apply_properties_from_panel)
-        self.prop_apply_btn.grid(row=0, column=0, sticky="ew", padx=(0, 3))
-        self.prop_default_btn = ttk.Button(actions, text="Maak default stijl", command=self.apply_defaults_from_panel)
-        self.prop_default_btn.grid(row=0, column=1, sticky="ew", padx=(3, 0))
+        self.prop_apply_btn = ttk.Button(actions, text="Toepassen op selectie", style="Tool.TButton", command=self.apply_properties_from_panel)
+        self.prop_apply_btn.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+        self.prop_default_btn = ttk.Button(actions, text="Maak default stijl", style="Tool.TButton", command=self.apply_defaults_from_panel)
+        self.prop_default_btn.grid(row=1, column=0, sticky="ew")
         self._capture_property_row_widgets()
         self._bind_left_panel_scroll_handlers(self.left_panel)
         self._bind_panel_context_handlers(self.left_panel)

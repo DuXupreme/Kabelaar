@@ -2456,6 +2456,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
 
     def _on_left_panel_canvas_configure(self, event):
         self.left_panel_canvas.itemconfigure(self.left_panel_window, width=max(1, int(event.width)))
+        self._update_wrap_labels(event.width)
         self._update_left_panel_scrollregion()
 
     def _left_panel_can_scroll(self) -> bool:
