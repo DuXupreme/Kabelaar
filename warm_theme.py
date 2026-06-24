@@ -43,6 +43,42 @@ _UI_FACE_FONTS = (
 )
 
 
+# Named fonts voor de UI-rollen. Ze worden door het schaalsysteem in
+# UIBuilderMixin meegeschaald (via UI_NAMED_FONTS), zodat de UI-schaal-functie
+# (60%-150%) weer overal werkt. De stijlen en de option-db verwijzen er
+# uitsluitend naar via deze namen.
+BODY_FONT = "KabelaarBody"
+STRONG_FONT = "KabelaarStrong"
+SMALL_FONT = "KabelaarSmall"
+HEADING_FONT = "KabelaarHeading"
+MONO_FONT = "KabelaarMono"
+SCALED_FONT_NAMES = (BODY_FONT, STRONG_FONT, SMALL_FONT, HEADING_FONT, MONO_FONT)
+# basismaat (pt) + gewicht per named font
+_FONT_SPECS = {
+    BODY_FONT: (10, "normal"),
+    STRONG_FONT: (10, "bold"),
+    SMALL_FONT: (9, "normal"),
+    HEADING_FONT: (13, "bold"),
+    MONO_FONT: (10, "normal"),
+}
+
+
+def _ensure_named_fonts(root, family: str):
+    """Maak (eenmalig) de Kabelaar-named-fonts en houd de familie bij.
+
+    Bestaat het font al, dan wordt alleen de familie gezet zodat de door het
+    schaalsysteem ingestelde grootte behouden blijft.
+    """
+    for name, (size, weight) in _FONT_SPECS.items():
+        try:
+            tkfont.nametofont(name, root=root).configure(family=family)
+        except tk.TclError:
+            # Via de Tcl-aanroep 'font create' i.p.v. tkfont.Font(): die laatste
+            # verwijdert het named font weer zodra het Python-object wordt
+            # opgeruimd. Een 'font create' blijft persistent in de interpreter.
+            root.tk.call("font", "create", name, "-family", family, "-size", size, "-weight", weight)
+
+
 def _first_available(root, candidates, fallback="TkDefaultFont"):
     try:
         families = set(tkfont.families(root))
@@ -85,11 +121,9 @@ def _btn_map(style, name, t, *, base, hover, pressed, border, border_hover):
 
 def configure_ttk(style: ttk.Style, t: dict, fonts: dict):
     """Kleur de hele ttk-laag (clam-basis) vanuit de tokens ``t``."""
-    ui = fonts["ui"]
-    heading = fonts["heading"]
-    mono = fonts["mono"]
-    body = (ui, 10)
-    small = (ui, 9)
+    # Verwijzen naar named fonts (worden meegeschaald door het schaalsysteem).
+    body = BODY_FONT
+    small = SMALL_FONT
 
     try:
         style.theme_use("clam")
@@ -120,8 +154,8 @@ def configure_ttk(style: ttk.Style, t: dict, fonts: dict):
     style.configure("Canvas.TFrame", background=t["canvas_bg"])
     style.configure("TLabel", background=t["app_bg"], foreground=t["text"], font=body)
     style.configure("Subtle.TLabel", background=t["app_bg"], foreground=t["subtle_fg"], font=small)
-    style.configure("Status.TLabel", background=t["app_bg"], foreground=t["status_fg"], font=(heading, 11))
-    style.configure("Coord.TLabel", background=t["app_bg"], foreground=t["subtle_fg"], font=(mono, 9))
+    style.configure("Status.TLabel", background=t["app_bg"], foreground=t["status_fg"], font=HEADING_FONT)
+    style.configure("Coord.TLabel", background=t["app_bg"], foreground=t["subtle_fg"], font=MONO_FONT)
 
     # Neutrale "chip"-knoppen (warm cremewit met zachte rand; accent-rand bij hover)
     for name, pad in (("TButton", (12, 7)), ("Tool.TButton", (10, 6))):
@@ -145,10 +179,7 @@ def configure_ttk(style: ttk.Style, t: dict, fonts: dict):
         )
 
     # Accent / primaire knoppen (gevuld klei)
-    for name, pad, font in (
-        ("Accent.TButton", (12, 6), (ui, 10, "bold")),
-        ("Primary.TButton", (16, 7), (ui, 10, "bold")),
-    ):
+    for name, pad in (("Accent.TButton", (12, 6)), ("Primary.TButton", (16, 7))):
         style.configure(
             name,
             background=t["accent"],
@@ -160,7 +191,7 @@ def configure_ttk(style: ttk.Style, t: dict, fonts: dict):
             relief="flat",
             anchor="center",
             padding=pad,
-            font=font,
+            font=STRONG_FONT,
         )
         style.map(
             name,
@@ -171,27 +202,52 @@ def configure_ttk(style: ttk.Style, t: dict, fonts: dict):
             darkcolor=[("pressed", t["accent_active"]), ("active", t["accent_hover"])],
         )
 
-    # Paneelkoppen (inklap-knoppen): ogen als serif-koppen, niet als knop
+    # Paneelkoppen als duidelijk "eilandje": gevulde band met rand + vette kop.
+    style.configure("PanelBand.TFrame", background=t["header_band"])
     style.configure(
         "PanelHeader.TButton",
-        background=t["app_bg"],
+        background=t["header_band"],
         foreground=t["header_fg"],
-        bordercolor=t["app_bg"],
-        lightcolor=t["app_bg"],
-        darkcolor=t["app_bg"],
-        focuscolor=t["app_bg"],
-        relief="flat",
+        bordercolor=t["header_band_border"],
+        lightcolor=t["header_band_border"],
+        darkcolor=t["header_band_border"],
+        focuscolor=t["header_band"],
+        relief="solid",
+        borderwidth=1,
         anchor="w",
-        padding=(2, 8),
-        font=(heading, 13, "bold"),
+        padding=(12, 9),
+        font=HEADING_FONT,
     )
     style.map(
         "PanelHeader.TButton",
-        background=[("pressed", t["surface_active"]), ("active", t["surface_alt"])],
+        background=[("pressed", t["accent_soft"]), ("active", t["accent_soft"])],
+        foreground=[("active", t["accent_active"]), ("pressed", t["accent_active"])],
+        bordercolor=[("active", t["accent"]), ("pressed", t["accent"])],
+        lightcolor=[("active", t["accent"]), ("pressed", t["accent"])],
+        darkcolor=[("active", t["accent"]), ("pressed", t["accent"])],
+    )
+    # Verberg-knopje in dezelfde band, subtiel.
+    style.configure(
+        "PanelClose.TButton",
+        background=t["header_band"],
+        foreground=t["subtle_fg"],
+        bordercolor=t["header_band_border"],
+        lightcolor=t["header_band_border"],
+        darkcolor=t["header_band_border"],
+        focuscolor=t["header_band"],
+        relief="solid",
+        borderwidth=1,
+        anchor="center",
+        padding=(6, 9),
+        font=BODY_FONT,
+    )
+    style.map(
+        "PanelClose.TButton",
+        background=[("active", t["accent_soft"]), ("pressed", t["accent_soft"])],
         foreground=[("active", t["accent"]), ("pressed", t["accent_active"])],
-        bordercolor=[("active", t["surface_alt"]), ("pressed", t["surface_active"])],
-        lightcolor=[("active", t["surface_alt"]), ("pressed", t["surface_active"])],
-        darkcolor=[("active", t["surface_alt"]), ("pressed", t["surface_active"])],
+        bordercolor=[("active", t["accent"]), ("pressed", t["accent"])],
+        lightcolor=[("active", t["accent"]), ("pressed", t["accent"])],
+        darkcolor=[("active", t["accent"]), ("pressed", t["accent"])],
     )
 
     # Invoervelden
@@ -323,7 +379,7 @@ def configure_ttk(style: ttk.Style, t: dict, fonts: dict):
         darkcolor=t["border"],
         relief="flat",
     )
-    style.configure("TLabelframe.Label", background=t["app_bg"], foreground=t["header_fg"], font=(heading, 10))
+    style.configure("TLabelframe.Label", background=t["app_bg"], foreground=t["header_fg"], font=STRONG_FONT)
     for name in ("TProgressbar", "Horizontal.TProgressbar", "Vertical.TProgressbar"):
         style.configure(
             name,
@@ -381,7 +437,6 @@ def _apply_options(root, t: dict, fonts: dict):
     Werkt op widgets die *na* deze aanroep worden gemaakt; bestaande widgets
     worden door ``UIBuilderMixin._apply_theme_colors`` direct herkleurd.
     """
-    ui = fonts["ui"]
     opt = root.option_add
     # Context- en menubalk-menu's
     opt("*Menu.background", t["menu_bg"])
@@ -391,7 +446,7 @@ def _apply_options(root, t: dict, fonts: dict):
     opt("*Menu.activeBorderWidth", 0)
     opt("*Menu.borderWidth", 1)
     opt("*Menu.relief", "flat")
-    opt("*Menu.font", (ui, 10))
+    opt("*Menu.font", BODY_FONT)
     # Standaard listboxes
     opt("*Listbox.background", t["field_bg"])
     opt("*Listbox.foreground", t["text"])
@@ -399,19 +454,20 @@ def _apply_options(root, t: dict, fonts: dict):
     opt("*Listbox.selectForeground", t["selection_fg"])
     opt("*Listbox.borderWidth", 0)
     opt("*Listbox.highlightThickness", 0)
-    opt("*Listbox.font", (ui, 10))
+    opt("*Listbox.font", BODY_FONT)
     # Combobox-popdown (een tk Listbox achter de schermen)
     opt("*TCombobox*Listbox.background", t["surface"])
     opt("*TCombobox*Listbox.foreground", t["text"])
     opt("*TCombobox*Listbox.selectBackground", t["selection_bg"])
     opt("*TCombobox*Listbox.selectForeground", t["selection_fg"])
-    opt("*TCombobox*Listbox.font", (ui, 10))
+    opt("*TCombobox*Listbox.font", BODY_FONT)
 
 
 def apply(root, theme_name: str) -> dict:
     """Pas het volledige warme thema toe op ``root`` en geef de fonts terug."""
     t = ui_theme.tokens(theme_name)
     fonts = resolve_fonts(root)
+    _ensure_named_fonts(root, fonts["ui"])
     style = ttk.Style(root)
     configure_ttk(style, t, fonts)
     _apply_named_fonts(root, fonts)

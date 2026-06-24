@@ -40,6 +40,9 @@ LIGHT = {
     # Randen - zachter en lichter
     "border": "#EADFCE",
     "border_strong": "#D6C6AC",
+    # Kop-band ("eilandje" per paneelsectie) - dieper zand dan de achtergrond
+    "header_band": "#F0E6D4",
+    "header_band_border": "#DDCDB3",
     # Velden
     "field_bg": "#FFFFFF",
     "field_border": "#DCCFB9",
@@ -85,6 +88,8 @@ DARK = {
     "header_fg": "#ECE0CA",
     "border": "#3C342A",
     "border_strong": "#4E4435",
+    "header_band": "#3A332A",
+    "header_band_border": "#4E4435",
     "field_bg": "#2A251E",
     "field_border": "#473E31",
     "accent": "#D67E58",

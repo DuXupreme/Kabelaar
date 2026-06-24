@@ -49,6 +49,9 @@ UI_NAMED_FONTS = (
     "TkIconFont",
     "TkTooltipFont",
     "TkFixedFont",
+    # De eigen named fonts van het warme thema meeschalen, zodat de
+    # UI-schaal-functie ook de ttk-widgets en menu's/listboxes raakt.
+    *warm_theme.SCALED_FONT_NAMES,
 )
 
 
@@ -272,17 +275,19 @@ class UIBuilderMixin:
         wrapper.grid(row=row, column=0, sticky="ew", pady=(0, 8))
         wrapper.columnconfigure(0, weight=1)
 
-        header = ttk.Frame(wrapper)
+        # De kop is één gevulde band ("eilandje"): kop-knop + verbergknop delen
+        # dezelfde band-achtergrond en sluiten naadloos op elkaar aan.
+        header = ttk.Frame(wrapper, style="PanelBand.TFrame")
         header.grid(row=0, column=0, sticky="ew")
         header.columnconfigure(0, weight=1)
         button = ttk.Button(header, style="PanelHeader.TButton", command=lambda k=key: self.toggle_panel_collapsed(k))
         button.grid(row=0, column=0, sticky="ew")
-        hide_button = ttk.Button(header, text="x", width=3, command=lambda k=key: self.set_panel_visible(k, False))
-        hide_button.grid(row=0, column=1, padx=(4, 0))
+        hide_button = ttk.Button(header, text="x", width=3, style="PanelClose.TButton", command=lambda k=key: self.set_panel_visible(k, False))
+        hide_button.grid(row=0, column=1, sticky="nsew")
         attach_tooltip(hide_button, "Dit paneel verbergen (terughalen via Beeld ▸ Panelen)")
 
         body = ttk.Frame(wrapper)
-        body.grid(row=1, column=0, sticky="ew", pady=(4, 0))
+        body.grid(row=1, column=0, sticky="ew", pady=(6, 0))
         body.columnconfigure(0, weight=1)
 
         self._panel_sections[key] = {
