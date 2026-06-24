@@ -15,7 +15,7 @@ from typing import List, Tuple
 from xml.sax.saxutils import escape
 
 from geometry import clamp
-from model import DimensionLine, WirePath, normalize_wire_style
+from model import DimensionLine, Node, NODE_RADIUS_MM, WirePath, normalize_node_kind, normalize_wire_style
 
 try:
     from PIL import ImageTk
@@ -107,6 +107,7 @@ class RenderingMixin:
 
         self._draw_image_notes()
         self._draw_connectors()
+        self._draw_nodes()
         self._draw_wires()
         self._draw_leaders()
         self._draw_dimensions()
@@ -234,6 +235,14 @@ class RenderingMixin:
                 self.canvas.create_oval(px - 3, py - 3, px + 3, py + 3, fill="#1d4ed8", outline="white", width=1)
                 self.canvas.create_text(px + 5, py - 5, text=pin_label, anchor="sw", fill="#1d4ed8", font=("Segoe UI", 7))
 
+        for node in self.nodes:
+            if not self._is_item_selected("node", node.node_id) or self._drag_render_skip("node", node.node_id):
+                continue
+            bx1, by1, bx2, by2 = self._node_world_bbox(node)
+            x1, y1 = self.world_to_canvas(bx1 - 1.0, by1 - 1.0)
+            x2, y2 = self.world_to_canvas(bx2 + 1.0, by2 + 1.0)
+            self.canvas.create_rectangle(x1, y1, x2, y2, outline="#d61f1f", dash=(4, 4), width=2)
+
         for note in self.image_notes:
             if self._is_item_selected("image", note.image_id) and not self._drag_render_skip("image", note.image_id):
                 bbox = self._image_note_bbox(note)
@@ -344,6 +353,73 @@ class RenderingMixin:
             return
         self.canvas.delete("temp_overlay")
         self._draw_temporary_geometry()
+
+    def _node_glyph_primitives(self, node) -> list:
+        """Teken-primitieven van een knoop-glyph in wereld-mm, gedeeld door scherm- en
+        pagina-renderer zodat beeld en export identiek zijn.
+
+        Vormen: ('disc', cx, cy, r, fill, outline) · ('ring', cx, cy, r_out, r_in, color)
+        · ('rect', cx, cy, half, fill, outline) · ('polyline', [(x, y), ...], color, width_mm).
+        Het type (splice/massa/ring/algemeen) bepaalt de vorm; de kleur komt van de knoop."""
+        r = NODE_RADIUS_MM
+        cx, cy = node.x_mm, node.y_mm
+        color = node.color or "#2a3550"
+        kind = normalize_node_kind(node.kind)
+        if kind == "splice":
+            return [("disc", cx, cy, r, color, color)]
+        if kind == "ground":
+            prims = [
+                ("disc", cx, cy, r * 0.45, color, color),
+                ("polyline", [(cx, cy), (cx, cy + r * 0.55)], color, 0.35),
+            ]
+            for half, depth in ((r * 1.0, r * 0.55), (r * 0.62, r * 0.95), (r * 0.26, r * 1.35)):
+                prims.append(("polyline", [(cx - half, cy + depth), (cx + half, cy + depth)], color, 0.35))
+            return prims
+        if kind == "ring":
+            return [("ring", cx, cy, r, r * 0.5, color)]
+        return [("rect", cx, cy, r * 0.85, color, color)]  # generic
+
+    def _draw_nodes(self):
+        """Teken knopen op het Tk-canvas (fallback zonder AA, en als drag-overlaylaag)."""
+        if not self.nodes:
+            return
+        for node in self.nodes:
+            if self._drag_render_skip("node", node.node_id):
+                continue
+            for prim in self._node_glyph_primitives(node):
+                shape = prim[0]
+                if shape == "disc":
+                    cx, cy, rad, fill, outline = prim[1], prim[2], prim[3], prim[4], prim[5]
+                    x1, y1 = self.world_to_canvas(cx - rad, cy - rad)
+                    x2, y2 = self.world_to_canvas(cx + rad, cy + rad)
+                    self.canvas.create_oval(x1, y1, x2, y2, fill=fill, outline=outline)
+                elif shape == "ring":
+                    cx, cy, ro, ri, col = prim[1], prim[2], prim[3], prim[4], prim[5]
+                    ox1, oy1 = self.world_to_canvas(cx - ro, cy - ro)
+                    ox2, oy2 = self.world_to_canvas(cx + ro, cy + ro)
+                    self.canvas.create_oval(ox1, oy1, ox2, oy2, fill=col, outline=col)
+                    ix1, iy1 = self.world_to_canvas(cx - ri, cy - ri)
+                    ix2, iy2 = self.world_to_canvas(cx + ri, cy + ri)
+                    self.canvas.create_oval(ix1, iy1, ix2, iy2, fill="#ffffff", outline=col)
+                elif shape == "rect":
+                    cx, cy, half, fill, outline = prim[1], prim[2], prim[3], prim[4], prim[5]
+                    x1, y1 = self.world_to_canvas(cx - half, cy - half)
+                    x2, y2 = self.world_to_canvas(cx + half, cy + half)
+                    self.canvas.create_rectangle(x1, y1, x2, y2, fill=fill, outline=outline)
+                elif shape == "polyline":
+                    pts, col, width_mm = prim[1], prim[2], prim[3]
+                    flat = []
+                    for px, py in pts:
+                        flat.extend(self.world_to_canvas(px, py))
+                    self.canvas.create_line(*flat, fill=col, width=max(1.0, width_mm * self.zoom))
+            label = node.label or node.node_id
+            lx, ly = self.world_to_canvas(node.x_mm, node.y_mm - NODE_RADIUS_MM - 1.0)
+            self.canvas.create_text(lx, ly, text=label, fill="#0d2238", font=("Segoe UI", 8), anchor="s")
+            if self._is_item_selected("node", node.node_id):
+                bx1, by1, bx2, by2 = self._node_world_bbox(node)
+                sx1, sy1 = self.world_to_canvas(bx1 - 1.0, by1 - 1.0)
+                sx2, sy2 = self.world_to_canvas(bx2 + 1.0, by2 + 1.0)
+                self.canvas.create_rectangle(sx1, sy1, sx2, sy2, outline="#d61f1f", dash=(4, 4), width=2)
 
     def _draw_connectors(self):
         if not self.connectors:

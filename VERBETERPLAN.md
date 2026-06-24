@@ -243,7 +243,7 @@ kernelkeuze gevalideerd is.
 
 ---
 
-## Batch 8 — Professioneel fundament: connectiviteit als bron 🔴 ⏳ BEZIG (8.1 ✅ · 8.2 fundament ✅ · 8.3 ✅)
+## Batch 8 — Professioneel fundament: connectiviteit als bron 🔴 ⏳ BEZIG (8.1 ✅ · 8.2 model+UI ✅* · 8.3 ✅)
 
 **Doel:** de structurele sprong van "nette tekentool" naar "tool die een harness-engineer
 vertrouwt en verkiest". Niet méér op het blad, maar een **diepere onderlaag**: connectiviteit
@@ -273,9 +273,18 @@ er allemaal op. Pas hierna kies je welke deliverables je er per doelgroep boveno
 > hun bestaan en onderdrukt de "meerdere draden"-waarschuwing op splices. 6 nieuwe tests
 > (43/43 groen) + headless save/load-round-trip met een splice en een v1→v2-load.
 >
-> **`*` Restant van 8.2 (volgende increment):** UI om knopen te *plaatsen/koppelen* en ze te
-> *renderen* op het blad. Dat hoort bij het teken-/formboard-werk (8.4/8.5); het datamodel,
-> de IO en de rapporten zijn nu node-bewust, dus een draad kán al op een splice eindigen.
+> **Uitgevoerd (8.2 — UI):** knopen zijn nu een eersteklas objecttype. Plaatsen via
+> `Tools ▸ Knoop plaatsen` (splice/massa/ring/algemeen), met een eigen glyph per type — gedeeld
+> tussen de AA-pagina (`_render_page_image`) en de Tk-fallback via `_node_glyph_primitives`.
+> Selecteren, slepen (incrementeel, hooks op `_drag_*`), box-select, dupliceren en verwijderen
+> werken; een verwijderde knoop maakt verwijzende draadeinden los. Undo, IO en de scene-cache
+> lopen mee omdat knopen in `_project_dict` zitten. Headless geverifieerd (plaatsen/hit-test/
+> slepen/dupliceren/verwijderen/undo + pixelcheck dat de glyph rendert) + 2 unit-tests (49/49 groen).
+>
+> **`*` Resteert voor 8.2 (afgebakende vervolgstappen):** (1) draadeinden tijdens tekenen op een
+> knoop *snappen* zodat `from_node`/`to_node` automatisch gevuld worden — dat is de echte
+> connectiviteit-door-tekenen; (2) type/label/kleur van een knoop in het eigenschappenpaneel
+> bewerken (nu alleen instelbaar bij plaatsing).
 
 > **Uitgevoerd (8.3):** nieuw `autosave.py` (pure helpers: pad/envelope/parsen/beschrijven,
 > los getest). De app schrijft elke 20 s een herstelbestand in de app-data map zolang er

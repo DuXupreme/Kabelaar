@@ -721,6 +721,25 @@ class Batch8ConnectivityFoundationTest(unittest.TestCase):
         # Een splice brengt bewust meerdere draden samen → geen 'meerdere draden'-waarschuwing.
         self.assertFalse(any("meerdere draden" in w for w in warnings))
 
+    def test_node_glyph_primitives_vary_by_kind(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        splice = app._node_glyph_primitives(Node(node_id="N1", kind="splice", x_mm=10.0, y_mm=10.0))
+        ground = app._node_glyph_primitives(Node(node_id="N2", kind="ground", x_mm=10.0, y_mm=10.0))
+        ring = app._node_glyph_primitives(Node(node_id="N3", kind="ring", x_mm=10.0, y_mm=10.0))
+        generic = app._node_glyph_primitives(Node(node_id="N4", kind="generic", x_mm=10.0, y_mm=10.0))
+
+        self.assertEqual(splice[0][0], "disc")
+        self.assertTrue(any(p[0] == "polyline" for p in ground))  # massa-balken
+        self.assertEqual(ring[0][0], "ring")
+        self.assertEqual(generic[0][0], "rect")
+
+    def test_node_world_bbox_is_centered_on_node(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        bx1, by1, bx2, by2 = app._node_world_bbox(Node(node_id="N1", x_mm=40.0, y_mm=25.0))
+        self.assertAlmostEqual((bx1 + bx2) / 2.0, 40.0)
+        self.assertAlmostEqual((by1 + by2) / 2.0, 25.0)
+        self.assertGreater(bx2 - bx1, 0.0)
+
 
 class Batch8AutosaveTest(unittest.TestCase):
     def test_recovery_path_lives_in_appdata_dir(self):

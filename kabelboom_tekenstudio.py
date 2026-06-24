@@ -87,6 +87,7 @@ from model import (
     Leader,
     NETLIST_CSV_HEADER,
     NODE_KIND_OPTIONS,
+    NODE_RADIUS_MM,
     Node,
     PAPER_PRESET_CUSTOM,
     PAPER_PRESET_OPTIONS,
@@ -107,6 +108,7 @@ from model import (
     WirePath,
     connector_pin_label,
     csv_text,
+    DEFAULT_NODE_KIND,
     dimension_orientation_internal,
     dimension_orientation_label,
     migrate_project_dict,
@@ -431,6 +433,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.symbols: Dict[str, StepSymbol] = {}
         self.connectors: List[ConnectorInstance] = []
         self.nodes: List[Node] = []
+        self._pending_node_kind = DEFAULT_NODE_KIND  # kind voor de volgende geplaatste knoop
         self.wires: List[WirePath] = []
         self.leaders: List[Leader] = []
         self.dimensions: List[DimensionLine] = []
@@ -1587,6 +1590,31 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 mx, my = self._wire_label_position(w)
                 draw_anchored_text(mm_to_px_x(mx + 1.2), mm_to_px_y(my - 1.2), w.label, "#1f2937", font_wire, anchor="sw")
 
+        node_outline_w = mm_width_to_px(0.3, minimum=1)
+        for node in self.nodes:
+            if self._drag_render_skip("node", node.node_id):
+                continue
+            for prim in self._node_glyph_primitives(node):
+                shape = prim[0]
+                if shape == "disc":
+                    cx, cy, rad, fill, outline = prim[1], prim[2], prim[3], prim[4], prim[5]
+                    draw.ellipse(
+                        [mm_point_to_px((cx - rad, cy - rad)), mm_point_to_px((cx + rad, cy + rad))],
+                        fill=fill, outline=outline, width=node_outline_w,
+                    )
+                elif shape == "ring":
+                    cx, cy, ro, ri, col = prim[1], prim[2], prim[3], prim[4], prim[5]
+                    draw.ellipse([mm_point_to_px((cx - ro, cy - ro)), mm_point_to_px((cx + ro, cy + ro))], fill=col, outline=col)
+                    draw.ellipse([mm_point_to_px((cx - ri, cy - ri)), mm_point_to_px((cx + ri, cy + ri))], fill="#ffffff", outline=col)
+                elif shape == "rect":
+                    cx, cy, half, fill, outline = prim[1], prim[2], prim[3], prim[4], prim[5]
+                    draw.rectangle([mm_point_to_px((cx - half, cy - half)), mm_point_to_px((cx + half, cy + half))], fill=fill, outline=outline)
+                elif shape == "polyline":
+                    pts, col, width_mm = prim[1], prim[2], prim[3]
+                    draw_polyline(pts, col, mm_width_to_px(width_mm, scale=0.4))
+            label = node.label or node.node_id
+            draw_anchored_text(mm_to_px_x(node.x_mm), mm_to_px_y(node.y_mm - NODE_RADIUS_MM - 1.0), label, "#0d2238", font_wire, anchor="ms")
+
         for l in self.leaders:
             if self._drag_render_skip("leader", l.leader_id):
                 continue
@@ -2476,6 +2504,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         label = {
             "select": "Select",
             "place_connector": "Connector plaatsen",
+            "place_node": "Knoop plaatsen",
             "draw_wire": "Draad tekenen",
             "draw_leader": "Leader tekenen",
             "draw_dimension": "Maatlijn tekenen",
@@ -2484,7 +2513,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.mode_var.set(f"Mode: {label}")
         self._update_mode_buttons()
         self.cancel_temporary_action()
-        if mode in {"draw_wire", "draw_leader", "draw_dimension", "draw_table", "place_connector"}:
+        if mode in {"draw_wire", "draw_leader", "draw_dimension", "draw_table", "place_connector", "place_node"}:
             self._clear_selection()
             self.load_selection_properties_to_panel()
             if synced_wire_defaults:
@@ -3170,6 +3199,17 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.prop_default_btn.configure(state="normal")
         self._load_wire_electrical_properties(None, False)
         self._load_connector_pin_properties(None, False)
+
+        if kind == "node":
+            node = self._find_node(ident)
+            if not node:
+                return
+            self._set_visible_property_rows(set())
+            self.prop_target_var.set(f"Knoop {node.node_id} ({node_kind_label(node.kind)})")
+            self._set_property_hint("Knoop: sleep om te verplaatsen, Delete om te verwijderen. Type/label bewerken via het paneel volgt.")
+            self.prop_apply_btn.configure(state="disabled")
+            self.prop_default_btn.configure(state="disabled")
+            return
 
         if kind == "wire":
             wire = self._find_wire(ident)
@@ -4348,12 +4388,14 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         return sorted(visited)
 
     def _selection_sort_key(self, item: Tuple[str, str]) -> Tuple[int, str]:
-        order = {"connector": 0, "wire": 1, "leader": 2, "table": 3, "text": 4, "image": 5}
+        order = {"connector": 0, "node": 1, "wire": 2, "leader": 3, "table": 4, "text": 5, "image": 6}
         return (order.get(item[0], 99), item[1])
 
     def _item_exists(self, kind: str, ident: str) -> bool:
         if kind == "connector":
             return self._find_connector(ident) is not None
+        if kind == "node":
+            return self._find_node(ident) is not None
         if kind == "wire":
             return self._find_wire(ident) is not None
         if kind == "leader":
@@ -4531,6 +4573,9 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         if kind == "connector":
             obj = self._find_connector(ident)
             return self._connector_world_bbox(obj) if obj else None
+        if kind == "node":
+            obj = self._find_node(ident)
+            return self._node_world_bbox(obj) if obj else None
         if kind == "wire":
             obj = self._find_wire(ident)
             if not obj:
@@ -4634,6 +4679,11 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 found.add(item)
         for conn in self.connectors:
             item = ("connector", conn.connector_id)
+            bbox = self._item_bbox(*item)
+            if bbox and self._bbox_intersects(bbox, box):
+                found.add(item)
+        for node in self.nodes:
+            item = ("node", node.node_id)
             bbox = self._item_bbox(*item)
             if bbox and self._bbox_intersects(bbox, box):
                 found.add(item)
@@ -4741,6 +4791,10 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 obj = self._find_connector(ident)
                 if obj:
                     originals[(kind, ident)] = (obj.x_mm, obj.y_mm)
+            elif kind == "node":
+                obj = self._find_node(ident)
+                if obj:
+                    originals[(kind, ident)] = (obj.x_mm, obj.y_mm)
             elif kind == "wire":
                 obj = self._find_wire(ident)
                 if obj:
@@ -4772,6 +4826,12 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         for (kind, ident), original in originals.items():
             if kind == "connector":
                 obj = self._find_connector(ident)
+                if obj:
+                    obj.x_mm = original[0] + dx
+                    obj.y_mm = original[1] + dy
+                    moved = True
+            elif kind == "node":
+                obj = self._find_node(ident)
                 if obj:
                     obj.x_mm = original[0] + dx
                     obj.y_mm = original[1] + dy
@@ -6005,6 +6065,10 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             self.place_connector_at(world[0], world[1])
             return
 
+        if self.mode == "place_node":
+            self.place_node_at(world[0], world[1])
+            return
+
         if self.mode == "draw_wire":
             snapped, snap_meta = self._wire_snap_if_needed(world, event)
             if not self.temp_wire_points:
@@ -6089,6 +6153,13 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 return
         if hit and hit[0] == "connector":
             obj = self._find_connector(hit[1])
+            if obj:
+                self.drag_original_world = (obj.x_mm, obj.y_mm)
+                self.drag_original_points = None
+                self._drag_history_before = self._capture_before_change()
+                self._drag_history_changed = False
+        elif hit and hit[0] == "node":
+            obj = self._find_node(hit[1])
             if obj:
                 self.drag_original_world = (obj.x_mm, obj.y_mm)
                 self.drag_original_points = None
@@ -6205,6 +6276,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 self._draw_image_notes()
             if "connector" in kinds:
                 self._draw_connectors()
+            if "node" in kinds:
+                self._draw_nodes()
             if "wire" in kinds:
                 self._draw_wires()
             if "leader" in kinds:
@@ -6410,6 +6483,12 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             return
         if self.selected[0] == "connector":
             obj = self._find_connector(self.selected[1])
+            if obj and self.drag_original_world:
+                obj.x_mm = self.drag_original_world[0] + dx
+                obj.y_mm = self.drag_original_world[1] + dy
+                self._drag_history_changed = True
+        elif self.selected[0] == "node":
+            obj = self._find_node(self.selected[1])
             if obj and self.drag_original_world:
                 obj.x_mm = self.drag_original_world[0] + dx
                 obj.y_mm = self.drag_original_world[1] + dy
@@ -6882,6 +6961,16 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             if c.connector_id == connector_id:
                 return c
         return None
+
+    def _find_node(self, node_id: str) -> Optional[Node]:
+        for n in self.nodes:
+            if n.node_id == node_id:
+                return n
+        return None
+
+    def _node_world_bbox(self, node: Node) -> Tuple[float, float, float, float]:
+        r = NODE_RADIUS_MM
+        return (node.x_mm - r, node.y_mm - r, node.x_mm + r, node.y_mm + r)
 
     def _find_table(self, table_id: str) -> Optional[TableBox]:
         for t in self.tables:
@@ -7392,6 +7481,23 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.redraw()
         self._commit_change(before, f"Connector {ref} geplaatst.")
 
+    def begin_place_node(self, kind: str):
+        """Start de knoop-plaatsmodus voor een type (splice/massa/ring/algemeen)."""
+        self._pending_node_kind = normalize_node_kind(kind)
+        self.set_mode("place_node")
+        self.status(f"Klik om een {node_kind_label(self._pending_node_kind).lower()} te plaatsen.")
+
+    def place_node_at(self, x_mm: float, y_mm: float):
+        kind = normalize_node_kind(getattr(self, "_pending_node_kind", DEFAULT_NODE_KIND))
+        before = self._capture_before_change()
+        nid = self._next_id("N", [n.node_id for n in self.nodes])
+        node = Node(node_id=nid, kind=kind, x_mm=x_mm, y_mm=y_mm)
+        self.nodes.append(node)
+        self._set_single_selection("node", nid)
+        self.load_selection_properties_to_panel()
+        self.redraw()
+        self._commit_change(before, f"Knoop {nid} ({node_kind_label(kind)}) geplaatst.")
+
     def finish_wire(self):
         self.temp_wire_points = []
         self.temp_wire_anchor_meta = None
@@ -7860,6 +7966,22 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             )
             self.connectors.append(clone)
             self._set_single_selection("connector", nid)
+        elif kind == "node":
+            obj = self._find_node(ident)
+            if not obj:
+                return
+            nid = self._next_id("N", [n.node_id for n in self.nodes])
+            self.nodes.append(
+                Node(
+                    node_id=nid,
+                    kind=obj.kind,
+                    x_mm=obj.x_mm + dx,
+                    y_mm=obj.y_mm + dy,
+                    label=obj.label,
+                    color=obj.color,
+                )
+            )
+            self._set_single_selection("node", nid)
         elif kind == "wire":
             obj = self._find_wire(ident)
             if not obj:
@@ -8154,6 +8276,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             return
         before = self._capture_before_change()
         connector_ids = {ident for kind, ident in items if kind == "connector"}
+        node_ids = {ident for kind, ident in items if kind == "node"}
         wire_ids = {ident for kind, ident in items if kind == "wire"}
         leader_ids = {ident for kind, ident in items if kind == "leader"}
         dimension_ids = {ident for kind, ident in items if kind == "dimension"}
@@ -8163,6 +8286,14 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         if connector_ids:
             self.connectors = [c for c in self.connectors if c.connector_id not in connector_ids]
             self._clear_connector_caches()
+        if node_ids:
+            self.nodes = [n for n in self.nodes if n.node_id not in node_ids]
+            # Draadeinden die naar een verwijderde knoop wezen, losmaken.
+            for w in self.wires:
+                if w.from_node in node_ids:
+                    w.from_node = ""
+                if w.to_node in node_ids:
+                    w.to_node = ""
         if wire_ids:
             delete_ids = self._valid_selected_wire_ids() or wire_ids
             self.wires = [w for w in self.wires if w.wire_id not in delete_ids]
@@ -8446,6 +8577,10 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             bx1, by1, bx2, by2 = self._text_note_bbox(note)
             if bx1 - tol <= x_mm <= bx2 + tol and by1 - tol <= y_mm <= by2 + tol:
                 return ("text", note.note_id)
+
+        for n in reversed(self.nodes):
+            if math.dist((x_mm, y_mm), (n.x_mm, n.y_mm)) <= NODE_RADIUS_MM + tol:
+                return ("node", n.node_id)
 
         for t in reversed(self.tables):
             tw, th = self._table_size(t)

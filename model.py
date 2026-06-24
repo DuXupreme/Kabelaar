@@ -58,6 +58,7 @@ NODE_KIND_TO_INTERNAL = {
 NODE_KIND_TO_LABEL = {v: k for k, v in NODE_KIND_TO_INTERNAL.items()}
 VALID_NODE_KINDS = set(NODE_KIND_TO_INTERNAL.values())
 DEFAULT_NODE_KIND = "splice"
+NODE_RADIUS_MM = 1.9  # visuele straal van een knoop-glyph (gedeeld door render + hit-test)
 PAPER_PRESET_CUSTOM = "Aangepast"
 PAPER_PRESET_OPTIONS = [
     "IEC A4 staand",

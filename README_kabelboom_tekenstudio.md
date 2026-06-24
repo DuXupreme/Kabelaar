@@ -18,6 +18,7 @@ Interactieve tekenapp voor kabelboom-werkbladen.
   - `Top (XY)`, `Bottom (XY)`, `Front (XZ)`, `Back (XZ)`, `Left (YZ)`, `Right (YZ)`
 - Connectoren plaatsen en verplaatsen op het blad
 - Connectoren krijgen part number, pin-count en optionele pinlabels/cavity labels
+- Knopen plaatsen via `Tools ▸ Knoop plaatsen`: splice, massapunt, ringterminal of algemeen knooppunt — selecteer-/sleep-/dupliceer-/verwijderbaar met een eigen symbool per type. Draadeinden kunnen in het datamodel op een knoop aansluiten (`from_node`/`to_node`); netlist en DRC zijn knoop-bewust
 - Draden tekenen: elke klik zet direct een endpoint en maakt een segment
 - Elk draadsegment is apart selecteerbaar
 - Gebogen draden en twisted pairs (instelbaar via contextmenu en eigenschappenpaneel)
