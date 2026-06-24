@@ -243,6 +243,62 @@ kernelkeuze gevalideerd is.
 
 ---
 
+## Batch 8 — Professioneel fundament: connectiviteit als bron 🔴 ⏳ BEZIG (8.1 ✅ · 8.2 fundament ✅)
+
+**Doel:** de structurele sprong van "nette tekentool" naar "tool die een harness-engineer
+vertrouwt en verkiest". Niet méér op het blad, maar een **diepere onderlaag**: connectiviteit
+wordt de bron (niet langer geometrisch afgeleid), het model kan splices/massapunten/bundels
+uitdrukken, en werk gaat nooit verloren. Dit is segment-agnostisch — shop, MKB én OEM leunen
+er allemaal op. Pas hierna kies je welke deliverables je er per doelgroep bovenop zet.
+
+> **Waarom deze volgorde:** elke stap leunt op de vorige. 8.1 (migratie) moet vóór elke
+> modelwijziging, anders breken bestaande projecten. 8.2 (knooppunt-model) is de kern waar
+> 8.4 (bundels) en 8.5 (formboard) uit voortvloeien. 8.3 (autosave) is onafhankelijk en
+> kan parallel.
+
+### 8A — Modelfundament 🔴
+
+| # | Taak | Bestand(en) | Klaar als… | Status |
+|---|------|-------------|------------|--------|
+| 8.1 | **Schema-migratielaag**: `migrate_project_dict(data, from_version)`-keten + bump naar `PROJECT_SCHEMA_VERSION = 2`. Onbekende/oudere velden worden netjes opgewaardeerd i.p.v. genegeerd | `io_project.py` (`_load_project_dict`), `model.py` (`PROJECT_SCHEMA_VERSION`) | een v1-project opent foutloos in v2; migratie heeft een eigen test | ✅ |
+| 8.2 | **Knooppunt-model**: expliciete `Node`/`Junction` (type: connector-pin · splice · massapunt · ringterminal). `WirePath` verwijst naar knoop-id's i.p.v. alleen `from_connector/to_connector` strings; bestaande from/to migreren naar knopen in 8.1 | `model.py`, `io_project.py` | één draad kan op een splice eindigen; netlist en DRC lezen uit knopen | ✅* |
+| 8.3 | **Autosave + crash-recovery**: periodiek naar `<project>.autosave`; bij opstart herstel aanbieden als een autosave nieuwer is dan het project | `io_project.py`, main (timer + opstartcheck) | na een geforceerde afsluiting biedt de app herstel aan; geen werk kwijt | ⏳ |
+
+> **Uitgevoerd (8.1 + 8.2-fundament):** `migrate_project_dict` met migratie-registry
+> (`_PROJECT_MIGRATIONS`) + `_migrate_v1_to_v2`; `_load_project_dict` migreert nu vóór
+> het uitlezen. `PROJECT_SCHEMA_VERSION` → 2. `Node`-dataclass (splice/ground/ring/generic)
+> + kind-helpers; `WirePath` kreeg `from_node`/`to_node`; knopen worden geserialiseerd/geladen
+> en `wire_electrical_kwargs` kopieert ze mee. `wire_netlist_rows` toont de node-id als
+> endpoint, `wire_electrical_drc` accepteert knoop-uiteinden als geldig verbonden, valideert
+> hun bestaan en onderdrukt de "meerdere draden"-waarschuwing op splices. 6 nieuwe tests
+> (43/43 groen) + headless save/load-round-trip met een splice en een v1→v2-load.
+>
+> **`*` Restant van 8.2 (volgende increment):** UI om knopen te *plaatsen/koppelen* en ze te
+> *renderen* op het blad. Dat hoort bij het teken-/formboard-werk (8.4/8.5); het datamodel,
+> de IO en de rapporten zijn nu node-bewust, dus een draad kán al op een splice eindigen.
+
+### 8B — Eerste professionele deliverable 🟠
+
+| # | Taak | Bestand(en) | Klaar als… | Status |
+|---|------|-------------|------------|--------|
+| 8.4 | **Bundels met auto-diameter**: draden die een traject delen vormen een bundel; diameter berekend uit de draaddoorsnedes (+ optionele tape/kous-toeslag). Breakouts waar draden de bundel verlaten | `model.py` (nieuw `Bundle`), `rendering.py` | een bundel toont een berekende diameter die meeverandert bij draad toevoegen/verwijderen | ⏳ |
+| 8.5 | **Formboard-weergave (1:1)**: een productie-aanzicht met taklengtes en bundeldiameters — de tekening voor de werkvloer, niet het schema | `rendering.py`, main (view-toggle) | formboard toont takken met lengtes; print op ware grootte | ⏳ |
+
+**Afhankelijkheid:** 8.4/8.5 hebben het knooppunt-model (8.2) nodig — splices/breakouts zijn
+knopen. Daarom 8A volledig vóór 8B.
+
+**Risico:** hoog-midden. 8.1/8.2 raken `model.py` + IO en wijzigen het schema → migratie en
+ronde-trip (opslaan→openen) per objecttype testen vóór commit. 8.2 raakt ook `wire_netlist_rows`
+en `wire_electrical_drc` (lezen straks uit knopen i.p.v. losse strings) → bestaande netlist/DRC-tests
+meelopen en uitbreiden. 8.5 is een nieuwe render-view (visuele regressie → bestaande blad-view mag
+niet veranderen).
+
+**Volgorde:** 8.1 → 8.2 (samen, één branch, want ze raken model + IO tegelijk) → 8.3 (parallel,
+los te committen) → 8.4 → 8.5. Na 8.5 staat het fundament; dán de doelgroep kiezen en de
+segment-specifieke laag plannen (onderdelenbibliotheek, IPC/WHMA-checks, cut-list, DXF/KBL-interop).
+
+---
+
 ## Aanbevolen uitvoervolgorde
 
 1. **Batch 1** — meeste zichtbare winst, laagste risico.

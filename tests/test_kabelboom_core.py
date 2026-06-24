@@ -17,10 +17,15 @@ from kabelboom_tekenstudio import (
     ConnectorInstance,
     DimensionLine,
     Leader,
+    Node,
     StepGeometry3D,
     StepSymbol,
     WirePath,
     connector_pin_label,
+    migrate_project_dict,
+    node_kind_internal,
+    node_kind_label,
+    normalize_node_kind,
     dimension_orientation_internal,
     dimension_orientation_label,
     normalize_dimension_orientation,
@@ -621,6 +626,98 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
         self.assertGreater(len(pts), 8)
         for x, y, _z in pts:
             self.assertAlmostEqual(math.hypot(x, y), 5.0, places=6)
+
+
+class Batch8ConnectivityFoundationTest(unittest.TestCase):
+    def test_migrate_v1_project_adds_nodes_and_wire_node_fields(self):
+        v1 = {
+            "schema_version": 1,
+            "wires": [
+                {"wire_id": "W1", "points_mm": [[0, 0], [10, 0]], "from_connector": "J1", "from_pin": "1"},
+            ],
+        }
+
+        migrated = migrate_project_dict(v1)
+
+        self.assertEqual(migrated["schema_version"], TEKENSTUDIO_SCHEMA_VERSION)
+        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(migrated["nodes"], [])
+        self.assertEqual(migrated["wires"][0]["from_node"], "")
+        self.assertEqual(migrated["wires"][0]["to_node"], "")
+        # Bestaande velden blijven intact.
+        self.assertEqual(migrated["wires"][0]["from_connector"], "J1")
+        # Niet-destructief voor de aanroeper: het origineel blijft v1.
+        self.assertNotIn("nodes", v1)
+        self.assertNotIn("from_node", v1["wires"][0])
+
+    def test_migrate_is_idempotent_and_assumes_v1_when_version_missing(self):
+        already_v2 = {"schema_version": 2, "nodes": [{"node_id": "SP1"}], "wires": []}
+        self.assertEqual(migrate_project_dict(already_v2)["nodes"], [{"node_id": "SP1"}])
+        # Ontbrekende schema_version wordt als v1 behandeld en opgewaardeerd.
+        upgraded = migrate_project_dict({"wires": []})
+        self.assertEqual(upgraded["schema_version"], TEKENSTUDIO_SCHEMA_VERSION)
+        self.assertEqual(upgraded["nodes"], [])
+
+    def test_node_dataclass_and_kind_helpers(self):
+        node = Node(node_id="SP1", kind="splice", x_mm=5.0, y_mm=6.0, label="CAN splice")
+
+        payload = asdict(node)
+
+        self.assertEqual(payload["node_id"], "SP1")
+        self.assertEqual(payload["kind"], "splice")
+        self.assertEqual(node_kind_label("ground"), "Massapunt")
+        self.assertEqual(node_kind_internal("Ringterminal"), "ring")
+        self.assertEqual(normalize_node_kind("onzin"), "generic")
+
+    def test_netlist_shows_node_reference_for_splice_endpoint(self):
+        wire = WirePath(
+            wire_id="W1",
+            points_mm=[(0.0, 0.0), (10.0, 0.0)],
+            from_connector="J1",
+            from_pin="1",
+            to_node="SP1",
+            signal_name="CAN_H",
+        )
+
+        row = wire_netlist_rows([wire])[0]
+
+        # Header: Wire ID, Signaal, Net, Van connector, Van pin, Naar connector, Naar pin, ...
+        self.assertEqual(row[3], "J1")
+        self.assertEqual(row[4], "1")
+        self.assertEqual(row[5], "SP1")  # node-id in de connector-kolom
+        self.assertEqual(row[6], "")  # een knoop heeft geen pin
+
+    def test_wire_connected_only_to_nodes_counts_as_having_data(self):
+        wire = WirePath(wire_id="W1", points_mm=[(0.0, 0.0), (1.0, 0.0)], from_node="SP1", to_node="SP2")
+        self.assertTrue(wire_has_electrical_data(wire))
+
+    def test_drc_treats_node_endpoints_as_connected_and_validates_existence(self):
+        wires = [
+            WirePath(
+                wire_id="W1", points_mm=[(0.0, 0.0), (1.0, 0.0)], signal_name="S1",
+                from_connector="J1", from_pin="1", to_node="SP1",
+                cross_section_mm2=0.35, length_mm=100.0,
+            ),
+            WirePath(
+                wire_id="W2", points_mm=[(0.0, 1.0), (1.0, 1.0)], signal_name="S2",
+                from_connector="J1", from_pin="2", to_node="SP1",
+                cross_section_mm2=0.35, length_mm=100.0,
+            ),
+            WirePath(
+                wire_id="W3", points_mm=[(0.0, 2.0), (1.0, 2.0)], signal_name="S3",
+                from_connector="J1", from_pin="3", to_node="SP_X",
+                cross_section_mm2=0.35, length_mm=100.0,
+            ),
+        ]
+
+        findings, warnings = wire_electrical_drc(wires, {"J1": (3, [])}, {"SP1": "splice"})
+
+        # Een verwijzing naar een niet-bestaande knoop is een fout.
+        self.assertTrue(any("onbekende naar-knoop SP_X" in f for f in findings))
+        # Een draad naar een splice mist GEEN connector/pin-metadata.
+        self.assertFalse(any("W1" in w and "mist connector/pin metadata" in w for w in warnings))
+        # Een splice brengt bewust meerdere draden samen → geen 'meerdere draden'-waarschuwing.
+        self.assertFalse(any("meerdere draden" in w for w in warnings))
 
 
 class Batch7RenderingAndKernelTest(unittest.TestCase):

@@ -6,6 +6,7 @@ zodat het datamodel apart te testen en te hergebruiken is.
 
 from __future__ import annotations
 
+import copy
 import csv
 import io
 import re
@@ -13,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 
-PROJECT_SCHEMA_VERSION = 1
+PROJECT_SCHEMA_VERSION = 2
 DEFAULT_WIRE_BRIDGE_ENABLED = True
 DEFAULT_WIRE_BRIDGE_HEIGHT_MM = 2.8
 DEFAULT_WIRE_BRIDGE_LENGTH_MM = 8.5
@@ -44,6 +45,19 @@ WIRE_ENDPOINT_DRAG_SCOPE_TO_LABEL = {
     "single": "Alleen dit uiteinde",
     "junction": "Aangesloten uiteinden mee",
 }
+# Knooppunten (Batch 8.2): verbindingspunten die geen connector-pin zijn —
+# splices, massapunten en ringterminals. Een draadeinde kan op een knoop landen
+# i.p.v. op een connector-pin.
+NODE_KIND_OPTIONS = ["Splice", "Massapunt", "Ringterminal", "Algemeen"]
+NODE_KIND_TO_INTERNAL = {
+    "Splice": "splice",
+    "Massapunt": "ground",
+    "Ringterminal": "ring",
+    "Algemeen": "generic",
+}
+NODE_KIND_TO_LABEL = {v: k for k, v in NODE_KIND_TO_INTERNAL.items()}
+VALID_NODE_KINDS = set(NODE_KIND_TO_INTERNAL.values())
+DEFAULT_NODE_KIND = "splice"
 PAPER_PRESET_CUSTOM = "Aangepast"
 PAPER_PRESET_OPTIONS = [
     "IEC A4 staand",
@@ -127,6 +141,84 @@ def connector_pin_label(index: int, labels: List[str]) -> str:
 
 
 @dataclass
+class Node:
+    """Verbindingsknoop die geen connector-pin is: splice, massapunt of ringterminal.
+
+    Draadeinden verwijzen via ``WirePath.from_node`` / ``to_node`` naar de ``node_id``.
+    Een splice mag bewust meerdere draden samenbrengen; massa-/ringknopen idem.
+    """
+
+    node_id: str
+    kind: str = DEFAULT_NODE_KIND  # splice|ground|ring|generic
+    x_mm: float = 0.0
+    y_mm: float = 0.0
+    label: str = ""
+    color: str = "#2a3550"
+
+
+def normalize_node_kind(kind: str) -> str:
+    return kind if kind in VALID_NODE_KINDS else "generic"
+
+
+def node_kind_label(kind: str) -> str:
+    return NODE_KIND_TO_LABEL.get(normalize_node_kind(kind), "Algemeen")
+
+
+def node_kind_internal(label: str) -> str:
+    return NODE_KIND_TO_INTERNAL.get(label, "generic")
+
+
+# --- Projectschema-migratie (Batch 8.1) ------------------------------------
+# Eén keten van stapsgewijze migraties brengt een ingeladen project-dict naar
+# het huidige PROJECT_SCHEMA_VERSION, zodat de loader altijd de actuele vorm mag
+# aannemen. Voeg per nieuwe schemaversie één _migrate_vN_to_vN_plus_1 toe en
+# registreer die in _PROJECT_MIGRATIONS, gesleuteld op de bronversie.
+
+def _migrate_v1_to_v2(data: dict) -> dict:
+    """v1 → v2: knooppunten (splice/massa/ring) geïntroduceerd.
+
+    v1-projecten kennen geen knopen en draden hebben geen ``from_node``/``to_node``.
+    We garanderen de v2-vorm: een top-level ``nodes``-lijst en node-velden op elke draad.
+    """
+    data.setdefault("nodes", [])
+    for wire in data.get("wires", []):
+        if isinstance(wire, dict):
+            wire.setdefault("from_node", "")
+            wire.setdefault("to_node", "")
+    return data
+
+
+_PROJECT_MIGRATIONS = {
+    1: _migrate_v1_to_v2,
+}
+
+
+def migrate_project_dict(data: dict) -> dict:
+    """Werk een ingeladen project-dict bij naar ``PROJECT_SCHEMA_VERSION``.
+
+    Idempotent en niet-destructief voor de aanroeper (werkt op een diepe kopie):
+    een al-actuele dict komt inhoudelijk ongewijzigd terug. Een ontbrekende of
+    onleesbare ``schema_version`` wordt als v1 behandeld — de enige eerder
+    uitgebrachte versie.
+    """
+    if not isinstance(data, dict):
+        return data
+    data = copy.deepcopy(data)
+    try:
+        version = int(data.get("schema_version", 1))
+    except (TypeError, ValueError):
+        version = 1
+    while version < PROJECT_SCHEMA_VERSION:
+        migrate = _PROJECT_MIGRATIONS.get(version)
+        if migrate is None:
+            break
+        data = migrate(data)
+        version += 1
+    data["schema_version"] = PROJECT_SCHEMA_VERSION
+    return data
+
+
+@dataclass
 class WirePath:
     wire_id: str
     points_mm: List[Tuple[float, float]]
@@ -149,6 +241,8 @@ class WirePath:
     length_mm: float = 0.0
     shielded: bool = False
     net_name: str = ""
+    from_node: str = ""  # node_id als dit uiteinde op een splice/massa/ring landt i.p.v. een connector-pin
+    to_node: str = ""
 
 
 def wire_electrical_kwargs(wire: WirePath) -> dict:
@@ -162,6 +256,8 @@ def wire_electrical_kwargs(wire: WirePath) -> dict:
         "length_mm": wire.length_mm,
         "shielded": wire.shielded,
         "net_name": wire.net_name,
+        "from_node": wire.from_node,
+        "to_node": wire.to_node,
     }
 
 
@@ -196,15 +292,21 @@ BOM_CSV_HEADER = ["Type", "Omschrijving", "Aantal", "Totale lengte mm"]
 def wire_netlist_rows(wires: List[WirePath]) -> List[List[object]]:
     rows: List[List[object]] = []
     for wire in sorted(wires, key=lambda w: w.wire_id):
+        # Een draadeinde dat op een knoop (splice/massa/ring) landt, toont de
+        # node-id in de connector-kolom; een knoop heeft geen pin.
+        from_ref = wire.from_node or wire.from_connector
+        from_pin = "" if wire.from_node else wire.from_pin
+        to_ref = wire.to_node or wire.to_connector
+        to_pin = "" if wire.to_node else wire.to_pin
         rows.append(
             [
                 wire.wire_id,
                 wire.signal_name,
                 wire.net_name,
-                wire.from_connector,
-                wire.from_pin,
-                wire.to_connector,
-                wire.to_pin,
+                from_ref,
+                from_pin,
+                to_ref,
+                to_pin,
                 wire.color,
                 wire.color_b,
                 f"{max(0.0, wire.cross_section_mm2):g}",
@@ -257,6 +359,8 @@ def wire_has_electrical_data(wire: WirePath) -> bool:
             wire.to_connector,
             wire.to_pin,
             wire.net_name,
+            wire.from_node,
+            wire.to_node,
             wire.length_mm > 0,
             wire.shielded,
         ]
@@ -272,29 +376,45 @@ def is_standard_cross_section(value: float, tol: float = 0.02) -> bool:
     return any(abs(value - std) <= tol for std in STANDARD_CROSS_SECTIONS_MM2)
 
 
-def wire_electrical_drc(wires: List[WirePath], connector_pin_data: Dict[str, Tuple[int, List[str]]]) -> Tuple[List[str], List[str]]:
+def wire_electrical_drc(
+    wires: List[WirePath],
+    connector_pin_data: Dict[str, Tuple[int, List[str]]],
+    node_kinds: Optional[Dict[str, str]] = None,
+) -> Tuple[List[str], List[str]]:
     findings: List[str] = []
     warnings: List[str] = []
     endpoint_usage: Dict[Tuple[str, str], List[str]] = {}
     connector_ids = set(connector_pin_data)
+    node_ids = set(node_kinds or {})
 
     for wire in wires:
         if not wire_has_electrical_data(wire):
             warnings.append(f"[WAARSCHUWING] Draad {wire.wire_id} heeft nog geen elektrische metadata.")
             continue
 
-        if not wire.from_connector or not wire.from_pin or not wire.to_connector or not wire.to_pin:
+        from_node = wire.from_node.strip()
+        to_node = wire.to_node.strip()
+        from_ok = bool(from_node) or (bool(wire.from_connector.strip()) and bool(wire.from_pin.strip()))
+        to_ok = bool(to_node) or (bool(wire.to_connector.strip()) and bool(wire.to_pin.strip()))
+        if not (from_ok and to_ok):
             warnings.append(f"[WAARSCHUWING] Draad {wire.wire_id} mist connector/pin metadata.")
 
         if not wire.signal_name and not wire.net_name:
             warnings.append(f"[WAARSCHUWING] Draad {wire.wire_id} mist signaal- of netnaam.")
 
-        endpoints: List[Tuple[str, str, str]] = [
-            ("van", wire.from_connector.strip().upper(), wire.from_pin.strip()),
-            ("naar", wire.to_connector.strip().upper(), wire.to_pin.strip()),
+        endpoints: List[Tuple[str, str, str, str]] = [
+            ("van", from_node, wire.from_connector.strip().upper(), wire.from_pin.strip()),
+            ("naar", to_node, wire.to_connector.strip().upper(), wire.to_pin.strip()),
         ]
         normalized_endpoints: List[Tuple[str, str]] = []
-        for label, ref, pin in endpoints:
+        for label, node_ref, ref, pin in endpoints:
+            if node_ref:
+                # Knoop-uiteinde (splice/massa/ring): valideer dat de knoop bestaat.
+                # Een knoop verbindt bewust meerdere draden, dus géén dubbel-gebruik-telling.
+                if node_ref not in node_ids:
+                    findings.append(f"[FOUT] Draad {wire.wire_id} verwijst naar onbekende {label}-knoop {node_ref}.")
+                normalized_endpoints.append(("node", node_ref))
+                continue
             if ref and ref not in connector_ids:
                 findings.append(f"[FOUT] Draad {wire.wire_id} verwijst naar onbekende {label}-connector {ref}.")
             if pin and re.fullmatch(r"\d+", pin) and int(pin) < 1:
@@ -315,8 +435,11 @@ def wire_electrical_drc(wires: List[WirePath], connector_pin_data: Dict[str, Tup
                 endpoint_usage.setdefault(endpoint, []).append(wire.wire_id)
 
         if len(normalized_endpoints) == 2 and normalized_endpoints[0] == normalized_endpoints[1]:
-            ref, pin = normalized_endpoints[0]
-            findings.append(f"[FOUT] Draad {wire.wire_id} begint en eindigt op dezelfde pin ({ref}:{pin}).")
+            first, second = normalized_endpoints[0]
+            if first == "node":
+                findings.append(f"[FOUT] Draad {wire.wire_id} begint en eindigt op dezelfde knoop ({second}).")
+            else:
+                findings.append(f"[FOUT] Draad {wire.wire_id} begint en eindigt op dezelfde pin ({first}:{second}).")
 
         if wire.cross_section_mm2 <= 0:
             warnings.append(f"[WAARSCHUWING] Draad {wire.wire_id} mist doorsnede mm2.")

@@ -29,13 +29,16 @@ from model import (
     ImageNote,
     Leader,
     NETLIST_CSV_HEADER,
+    Node,
     PROJECT_SCHEMA_VERSION,
     StepSymbol,
     TableBox,
     TextNote,
     WirePath,
     csv_text,
+    migrate_project_dict,
     normalize_dimension_orientation,
+    normalize_node_kind,
     normalize_wire_style,
     paper_preset_dimensions,
     paper_preset_for_dimensions,
@@ -117,6 +120,7 @@ class ProjectIOMixin:
             },
             "symbols": [asdict(sym) for sym in self.symbols.values()],
             "connectors": [asdict(c) for c in self.connectors],
+            "nodes": [asdict(n) for n in self.nodes],
             "wires": [asdict(w) for w in self.wires],
             "leaders": [asdict(l) for l in self.leaders],
             "dimensions": [asdict(d) for d in self.dimensions],
@@ -126,6 +130,9 @@ class ProjectIOMixin:
         }
 
     def _load_project_dict(self, data: dict):
+        # Breng oudere projecten naar het huidige schema vóór we velden uitlezen,
+        # zodat de rest van deze methode de actuele vorm mag aannemen (Batch 8.1).
+        data = migrate_project_dict(data)
         self._clear_connector_caches()
         self._clear_wire_caches()
         paper = data.get("paper", {})
@@ -271,6 +278,28 @@ class ProjectIOMixin:
                 LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
                 continue
 
+        self.nodes = []
+        node_ids_seen: set[str] = set()
+        for raw in data.get("nodes", []):
+            try:
+                node_id = str(raw["node_id"]).strip()
+                if not node_id or node_id in node_ids_seen:
+                    continue
+                node_ids_seen.add(node_id)
+                self.nodes.append(
+                    Node(
+                        node_id=node_id,
+                        kind=normalize_node_kind(str(raw.get("kind", "splice"))),
+                        x_mm=float(raw.get("x_mm", 0.0)),
+                        y_mm=float(raw.get("y_mm", 0.0)),
+                        label=str(raw.get("label", "")),
+                        color=str(raw.get("color", "#2a3550")),
+                    )
+                )
+            except Exception:
+                LOGGER.warning("Project-item overgeslagen bij laden", exc_info=True)
+                continue
+
         self.wires = []
         wire_ids_seen: set[str] = set()
         for raw in data.get("wires", []):
@@ -306,6 +335,8 @@ class ProjectIOMixin:
                 length_mm = max(0.0, try_float(raw.get("length_mm", 0.0), 0.0))
                 shielded = bool(raw.get("shielded", False))
                 net_name = str(raw.get("net_name", ""))
+                from_node = str(raw.get("from_node", "")).strip()
+                to_node = str(raw.get("to_node", "")).strip()
 
                 def unique_wire_id(candidate: str) -> str:
                     out = candidate
@@ -341,6 +372,8 @@ class ProjectIOMixin:
                             length_mm=length_mm,
                             shielded=shielded,
                             net_name=net_name,
+                            from_node=from_node,
+                            to_node=to_node,
                         )
                     )
                 else:
@@ -370,6 +403,8 @@ class ProjectIOMixin:
                                 length_mm=length_mm,
                                 shielded=shielded,
                                 net_name=net_name,
+                                from_node=from_node,
+                                to_node=to_node,
                             )
                         )
             except Exception:
@@ -510,6 +545,7 @@ class ProjectIOMixin:
         self._clear_wire_caches()
         self.symbols = {}
         self.connectors = []
+        self.nodes = []
         self.wires = []
         self.leaders = []
         self.dimensions = []

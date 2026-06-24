@@ -85,6 +85,8 @@ from model import (
     ImageNote,
     Leader,
     NETLIST_CSV_HEADER,
+    NODE_KIND_OPTIONS,
+    Node,
     PAPER_PRESET_CUSTOM,
     PAPER_PRESET_OPTIONS,
     PAPER_PRESET_SIZES_MM,
@@ -106,7 +108,11 @@ from model import (
     csv_text,
     dimension_orientation_internal,
     dimension_orientation_label,
+    migrate_project_dict,
+    node_kind_internal,
+    node_kind_label,
     normalize_dimension_orientation,
+    normalize_node_kind,
     normalize_wire_style,
     paper_preset_dimensions,
     paper_preset_for_dimensions,
@@ -422,6 +428,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._saved_snapshot = ""
         self.symbols: Dict[str, StepSymbol] = {}
         self.connectors: List[ConnectorInstance] = []
+        self.nodes: List[Node] = []
         self.wires: List[WirePath] = []
         self.leaders: List[Leader] = []
         self.dimensions: List[DimensionLine] = []
@@ -8299,6 +8306,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
 
         connectors_by_id = {c.connector_id: c for c in self.connectors}
         connector_pin_data = {c.connector_id: (max(1, c.pin_count), list(c.pin_labels)) for c in self.connectors}
+        node_kinds = {n.node_id: n.kind for n in self.nodes}
 
         for c in self.connectors:
             if not self._bbox_inside_frame(self._connector_world_bbox(c)):
@@ -8321,7 +8329,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             if not self._bbox_inside_frame((bx1, by1, bx2, by2)):
                 warns.append(f"[WAARSCHUWING] Draad {w.wire_id} valt (deels) buiten het tekenframe.")
 
-        electrical_findings, electrical_warns = wire_electrical_drc(self.wires, connector_pin_data)
+        electrical_findings, electrical_warns = wire_electrical_drc(self.wires, connector_pin_data, node_kinds)
         findings.extend(electrical_findings)
         warns.extend(electrical_warns)
 
