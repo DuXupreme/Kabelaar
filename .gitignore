@@ -21,6 +21,9 @@ __pycache__/
 # Persoonlijke gebruikersinstellingen (wordt op runtime aangemaakt)
 settings.json
 
+# Autosave-/crash-recovery-bestand (op runtime aangemaakt)
+autosave_recovery.json
+
 # Op runtime aangemaakte bibliotheken (lokaal, niet versiebeheerd)
 blocks_library.json
 symbols_library.json

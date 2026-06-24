@@ -32,6 +32,7 @@ import threading
 from app_settings import default_settings_path, existing_dir, load_app_settings, parent_dir, update_app_settings
 from logging_setup import configure_logging, log_path
 from project_io import write_text_atomic
+import autosave
 from ui_scaling import UI_SCALE_LABELS, enable_dpi_awareness, normalize_ui_scale_percent, schedule_window_scaling, set_ui_scale
 import theme as ui_theme
 from ui_tooltip import attach as attach_tooltip
@@ -167,6 +168,7 @@ LOGGER = logging.getLogger("kabelboom")
 
 APP_TITLE = "Kabelboom Tekenstudio"
 APP_SETTINGS_KEY = "kabelboom_tekenstudio"
+AUTOSAVE_INTERVAL_MS = 20000  # periodieke autosave van niet-opgeslagen werk (Batch 8.3)
 PROJECTION_OPTIONS = [
     "Top (XY)",
     "Bottom (XY)",
@@ -613,6 +615,12 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.redraw()
         self._mark_saved()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+        # Autosave + crash-recovery (Batch 8.3): bied eerst eventueel hersteld
+        # werk van een vorige sessie aan, en start daarna de periodieke autosave.
+        self._autosave_after_id = None
+        self._recovery_handled = False
+        self.after(300, self._check_for_recovery)
 
         self._update_in_progress = False
         # Stille controle op updates kort na het opstarten.
@@ -2039,7 +2047,86 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
 
     def _on_close(self):
         if self._confirm_discard_changes():
+            # Schone afsluiting (opgeslagen of bewust verworpen): geen herstel meer nodig.
+            if self._autosave_after_id is not None:
+                try:
+                    self.after_cancel(self._autosave_after_id)
+                except Exception:
+                    pass
+                self._autosave_after_id = None
+            self._discard_recovery()
             self.destroy()
+
+    # --- Autosave + crash-recovery (Batch 8.3) ----------------------------
+    def _recovery_path(self) -> Path:
+        return autosave.recovery_path(default_settings_path().parent)
+
+    def _check_for_recovery(self):
+        """Eenmalig bij opstart: bied niet-opgeslagen werk van een vorige sessie aan."""
+        if self._recovery_handled:
+            return
+        self._recovery_handled = True
+        envelope = None
+        path = self._recovery_path()
+        try:
+            if path.exists():
+                envelope = autosave.parse_recovery(path.read_text(encoding="utf-8"))
+        except OSError:
+            LOGGER.warning("Kon herstelbestand niet lezen", exc_info=True)
+        if envelope is not None:
+            try:
+                if messagebox.askyesno(
+                    APP_TITLE,
+                    "Er is niet-opgeslagen werk van een vorige sessie gevonden "
+                    "(de app is mogelijk onverwacht afgesloten).\n\n"
+                    f"{autosave.describe_recovery(envelope)}\n\n"
+                    "Wil je dit herstellen?",
+                    parent=self,
+                ):
+                    self._restore_from_recovery(envelope)
+                else:
+                    self._discard_recovery()
+            except Exception:
+                LOGGER.warning("Herstellen van werk mislukt", exc_info=True)
+        self._schedule_autosave()
+
+    def _restore_from_recovery(self, envelope: dict):
+        self._load_project_dict(envelope.get("project", {}))
+        raw_path = str(envelope.get("project_path", "")).strip()
+        self.project_path = Path(raw_path) if raw_path else None
+        self._reset_history()
+        # Bewust geen _mark_saved: het herstelde werk staat nog niet op schijf,
+        # dus het blijft "gewijzigd" totdat de gebruiker zelf opslaat.
+        self.status("Niet-opgeslagen werk hersteld. Vergeet niet op te slaan.")
+
+    def _discard_recovery(self):
+        try:
+            self._recovery_path().unlink(missing_ok=True)
+        except OSError:
+            LOGGER.warning("Kon herstelbestand niet verwijderen", exc_info=True)
+
+    def _schedule_autosave(self):
+        self._autosave_after_id = self.after(AUTOSAVE_INTERVAL_MS, self._autosave_tick)
+
+    def _autosave_tick(self):
+        try:
+            if self._has_unsaved_changes():
+                envelope = autosave.recovery_envelope(
+                    self._project_dict(),
+                    str(self.project_path) if self.project_path else "",
+                )
+                write_text_atomic(
+                    self._recovery_path(),
+                    json.dumps(envelope, ensure_ascii=False),
+                    backup=False,
+                )
+            else:
+                # Schone staat (net opgeslagen / nieuw): geen herstelbestand nodig.
+                self._discard_recovery()
+        except Exception:
+            LOGGER.warning("Autosave mislukt", exc_info=True)
+        finally:
+            self._schedule_autosave()
 
     def _capture_before_change(self) -> Optional[str]:
         self._invalidate_aa_scene()

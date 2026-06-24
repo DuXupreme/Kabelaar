@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 import tempfile
 import unittest
@@ -58,6 +59,7 @@ from kabelboom_tekenstudio import (
 from model import is_standard_cross_section, STANDARD_CROSS_SECTIONS_MM2
 from project_io import write_text_atomic
 import app_settings
+import autosave
 from ui_scaling import UI_SCALE_LABELS, normalize_ui_scale_percent
 from aa_render import PageImageCache, render_viewport_image, screen_render_dpi
 from step_kernel import StepMesh, parse_obj_mesh, project_mesh_outline
@@ -718,6 +720,37 @@ class Batch8ConnectivityFoundationTest(unittest.TestCase):
         self.assertFalse(any("W1" in w and "mist connector/pin metadata" in w for w in warnings))
         # Een splice brengt bewust meerdere draden samen → geen 'meerdere draden'-waarschuwing.
         self.assertFalse(any("meerdere draden" in w for w in warnings))
+
+
+class Batch8AutosaveTest(unittest.TestCase):
+    def test_recovery_path_lives_in_appdata_dir(self):
+        path = autosave.recovery_path(Path("/tmp/app"))
+        self.assertEqual(path.name, "autosave_recovery.json")
+        self.assertEqual(path.parent, Path("/tmp/app"))
+
+    def test_recovery_envelope_roundtrips_through_json(self):
+        envelope = autosave.recovery_envelope(
+            {"schema_version": 2, "wires": []}, "C:/x/p.json", saved_at=123.0
+        )
+
+        parsed = autosave.parse_recovery(json.dumps(envelope))
+
+        self.assertEqual(parsed["project"]["schema_version"], 2)
+        self.assertEqual(parsed["project_path"], "C:/x/p.json")
+        self.assertEqual(parsed["saved_at"], 123.0)
+
+    def test_parse_recovery_rejects_invalid_payloads(self):
+        self.assertIsNone(autosave.parse_recovery("niet json{"))
+        self.assertIsNone(autosave.parse_recovery(json.dumps({"kind": "iets-anders", "project": {}})))
+        self.assertIsNone(autosave.parse_recovery(json.dumps({"kind": autosave.RECOVERY_KIND})))
+        self.assertIsNone(autosave.parse_recovery(json.dumps({"kind": autosave.RECOVERY_KIND, "project": "x"})))
+
+    def test_describe_recovery_names_file_or_marks_unsaved(self):
+        saved = autosave.recovery_envelope({"a": 1}, "C:/proj/harness.json", saved_at=0.0)
+        self.assertIn("harness.json", autosave.describe_recovery(saved))
+
+        unsaved = autosave.recovery_envelope({"a": 1}, "", saved_at=0.0)
+        self.assertIn("niet-opgeslagen", autosave.describe_recovery(unsaved))
 
 
 class Batch7RenderingAndKernelTest(unittest.TestCase):

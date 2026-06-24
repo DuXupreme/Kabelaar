@@ -243,7 +243,7 @@ kernelkeuze gevalideerd is.
 
 ---
 
-## Batch 8 — Professioneel fundament: connectiviteit als bron 🔴 ⏳ BEZIG (8.1 ✅ · 8.2 fundament ✅)
+## Batch 8 — Professioneel fundament: connectiviteit als bron 🔴 ⏳ BEZIG (8.1 ✅ · 8.2 fundament ✅ · 8.3 ✅)
 
 **Doel:** de structurele sprong van "nette tekentool" naar "tool die een harness-engineer
 vertrouwt en verkiest". Niet méér op het blad, maar een **diepere onderlaag**: connectiviteit
@@ -262,7 +262,7 @@ er allemaal op. Pas hierna kies je welke deliverables je er per doelgroep boveno
 |---|------|-------------|------------|--------|
 | 8.1 | **Schema-migratielaag**: `migrate_project_dict(data, from_version)`-keten + bump naar `PROJECT_SCHEMA_VERSION = 2`. Onbekende/oudere velden worden netjes opgewaardeerd i.p.v. genegeerd | `io_project.py` (`_load_project_dict`), `model.py` (`PROJECT_SCHEMA_VERSION`) | een v1-project opent foutloos in v2; migratie heeft een eigen test | ✅ |
 | 8.2 | **Knooppunt-model**: expliciete `Node`/`Junction` (type: connector-pin · splice · massapunt · ringterminal). `WirePath` verwijst naar knoop-id's i.p.v. alleen `from_connector/to_connector` strings; bestaande from/to migreren naar knopen in 8.1 | `model.py`, `io_project.py` | één draad kan op een splice eindigen; netlist en DRC lezen uit knopen | ✅* |
-| 8.3 | **Autosave + crash-recovery**: periodiek naar `<project>.autosave`; bij opstart herstel aanbieden als een autosave nieuwer is dan het project | `io_project.py`, main (timer + opstartcheck) | na een geforceerde afsluiting biedt de app herstel aan; geen werk kwijt | ⏳ |
+| 8.3 | **Autosave + crash-recovery**: periodiek herstelbestand in app-data; bij opstart herstel aanbieden na een onverwachte afsluiting | nieuw `autosave.py`, main (timer + opstartcheck + `_on_close`) | na een geforceerde afsluiting biedt de app herstel aan; geen werk kwijt | ✅ |
 
 > **Uitgevoerd (8.1 + 8.2-fundament):** `migrate_project_dict` met migratie-registry
 > (`_PROJECT_MIGRATIONS`) + `_migrate_v1_to_v2`; `_load_project_dict` migreert nu vóór
@@ -276,6 +276,14 @@ er allemaal op. Pas hierna kies je welke deliverables je er per doelgroep boveno
 > **`*` Restant van 8.2 (volgende increment):** UI om knopen te *plaatsen/koppelen* en ze te
 > *renderen* op het blad. Dat hoort bij het teken-/formboard-werk (8.4/8.5); het datamodel,
 > de IO en de rapporten zijn nu node-bewust, dus een draad kán al op een splice eindigen.
+
+> **Uitgevoerd (8.3):** nieuw `autosave.py` (pure helpers: pad/envelope/parsen/beschrijven,
+> los getest). De app schrijft elke 20 s een herstelbestand in de app-data map zolang er
+> niet-opgeslagen werk is, en ruimt het op zodra de staat schoon is. Bij opstart wordt
+> hersteld werk van een vorige sessie aangeboden (de `after`-keten start de autosave pas ná
+> die check). Een schone afsluiting (`_on_close`: opslaan of bewust verwerpen) verwijdert het
+> bestand, dus het herstelaanbod verschijnt alleen na een echte crash. 4 nieuwe tests +
+> headless schrijf/herstel/opruim-round-trip door de echte app (47/47 groen).
 
 ### 8B — Eerste professionele deliverable 🟠
 

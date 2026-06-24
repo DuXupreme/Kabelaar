@@ -45,6 +45,7 @@ Interactieve tekenapp voor kabelboom-werkbladen.
   - Transformeren (roteren, spiegelen) voor ondersteunde objecten
   - Tabelacties: rijen/kolommen invoegen/verwijderen + tekstuitlijning
 - Opslaan/openen als JSON
+- Autosave + crash-recovery: niet-opgeslagen werk wordt elke 20 s in de app-data map bewaard en na een onverwachte afsluiting bij het opstarten aangeboden om te herstellen
 - Projectinstellingen/default stijlen en view/snap-voorkeuren worden mee opgeslagen
 - Anti-aliased schermweergave via een gecachete Pillow-scène; selectiehandles en slepen blijven interactieve overlays
 - Exporteren naar SVG
@@ -108,7 +109,7 @@ Tests draaien:
 python -m unittest discover -s tests
 ```
 
-JSON-projecten worden atomisch opgeslagen via een tijdelijk bestand; bij overschrijven blijft de vorige versie als `.bak` naast het project staan. Persoonlijke voorkeuren (UI-schaal, laatst gebruikte mappen) staan in `settings.json` naast de scripts en horen niet bij een kabelboomproject zelf.
+JSON-projecten worden atomisch opgeslagen via een tijdelijk bestand; bij overschrijven blijft de vorige versie als `.bak` naast het project staan. Oudere projecten worden bij het openen automatisch naar het huidige schema gemigreerd (`migrate_project_dict`), zodat ze blijven werken na uitbreidingen van het datamodel. Naast het handmatig opslaan houdt de app een autosave-herstelbestand (`autosave_recovery.json`) in de app-data map bij; na een crash biedt de app bij het opstarten aan dat werk te herstellen. Persoonlijke voorkeuren (UI-schaal, laatst gebruikte mappen) staan in `settings.json` naast de scripts en horen niet bij een kabelboomproject zelf.
 
 ## Distributie (Velopack)
 
