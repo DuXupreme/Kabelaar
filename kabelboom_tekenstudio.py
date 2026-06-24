@@ -3204,10 +3204,13 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             node = self._find_node(ident)
             if not node:
                 return
-            self._set_visible_property_rows(set())
+            self._set_visible_property_rows({3})  # alleen het naam/tekst-veld
+            self._set_text_property_label("Knoop-naam")
             self.prop_target_var.set(f"Knoop {node.node_id} ({node_kind_label(node.kind)})")
-            self._set_property_hint("Knoop: sleep om te verplaatsen, Delete om te verwijderen. Type/label bewerken via het paneel volgt.")
-            self.prop_apply_btn.configure(state="disabled")
+            self.prop_text_var.set(node.label)
+            self._set_property_hint("Pas de naam aan en klik Toepassen. Type wijzig je via rechtermuisknop; sleep om te verplaatsen.")
+            self._set_prop_widget_state(self.prop_text_entry, True)
+            self.prop_apply_btn.configure(state="normal")
             self.prop_default_btn.configure(state="disabled")
             return
 
@@ -3682,6 +3685,12 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 if apply_text:
                     wire.label = text_value.strip()
                 touched_wires = True
+            elif kind == "node":
+                node = self._find_node(ident)
+                if not node:
+                    continue
+                if apply_text:
+                    node.label = text_value.strip()
             elif kind == "leader":
                 leader = self._find_leader(ident)
                 if not leader:
@@ -6798,6 +6807,15 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 dim_menu.add_command(label="Maatwaarde overschrijven...", command=self.prompt_selected_dimension_value)
                 menu.add_cascade(label="Maatlijn", menu=dim_menu)
 
+            if kind == "node":
+                node_type_menu = tk.Menu(menu, tearoff=0)
+                node_type_menu.add_command(label="Splice", command=lambda: self.set_selected_node_kind("splice"))
+                node_type_menu.add_command(label="Massapunt", command=lambda: self.set_selected_node_kind("ground"))
+                node_type_menu.add_command(label="Ringterminal", command=lambda: self.set_selected_node_kind("ring"))
+                node_type_menu.add_command(label="Algemeen knooppunt", command=lambda: self.set_selected_node_kind("generic"))
+                menu.add_cascade(label="Knoop-type", menu=node_type_menu)
+                menu.add_command(label="Naam wijzigen (eigenschappen)", command=self.focus_properties_panel)
+
             if kind == "table":
                 table = self._find_table(ident)
                 if not (table and table.is_border):
@@ -6848,6 +6866,12 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         menu.add_command(label="Mode: Draad tekenen", command=lambda: self.set_mode("draw_wire"))
         menu.add_command(label="Mode: Leader tekenen", command=lambda: self.set_mode("draw_leader"))
         menu.add_command(label="Mode: Tabel plaatsen", command=lambda: self.set_mode("draw_table"))
+        node_place_menu = tk.Menu(menu, tearoff=0)
+        node_place_menu.add_command(label="Splice", command=lambda: self._context_place_node("splice", world[0], world[1]))
+        node_place_menu.add_command(label="Massapunt", command=lambda: self._context_place_node("ground", world[0], world[1]))
+        node_place_menu.add_command(label="Ringterminal", command=lambda: self._context_place_node("ring", world[0], world[1]))
+        node_place_menu.add_command(label="Algemeen knooppunt", command=lambda: self._context_place_node("generic", world[0], world[1]))
+        menu.add_cascade(label="Knoop plaatsen hier", menu=node_place_menu)
         self._add_application_context_submenus(menu)
         self._popup_menu(event, menu)
 
@@ -6884,6 +6908,15 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.pan_x += dx
         self.pan_y += dy
         self.pan_start = (event.x, event.y)
+        # Tijdens het pannen de goedkope (bilineaire) AA-preview gebruiken i.p.v. een
+        # dure LANCZOS-resize per frame; pas na stilstand (settle) weer scherp renderen.
+        self._aa_zoom_preview = True
+        if self._aa_zoom_settle_after_id is not None:
+            try:
+                self.after_cancel(self._aa_zoom_settle_after_id)
+            except tk.TclError:
+                pass
+        self._aa_zoom_settle_after_id = self.after(140, self._finish_aa_zoom_settle)
         self.request_redraw()
 
     def on_middle_up(self, _event):
@@ -7497,6 +7530,22 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.load_selection_properties_to_panel()
         self.redraw()
         self._commit_change(before, f"Knoop {nid} ({node_kind_label(kind)}) geplaatst.")
+
+    def _context_place_node(self, kind: str, x_mm: float, y_mm: float):
+        self._pending_node_kind = normalize_node_kind(kind)
+        self.place_node_at(x_mm, y_mm)
+
+    def set_selected_node_kind(self, kind: str):
+        if not self.selected or self.selected[0] != "node":
+            return
+        node = self._find_node(self.selected[1])
+        if not node:
+            return
+        before = self._capture_before_change()
+        node.kind = normalize_node_kind(kind)
+        self.load_selection_properties_to_panel()
+        self.redraw()
+        self._commit_change(before, f"Knoop {node.node_id} → {node_kind_label(node.kind)}.")
 
     def finish_wire(self):
         self.temp_wire_points = []

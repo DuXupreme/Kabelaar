@@ -426,6 +426,7 @@ class UIBuilderMixin:
             "draw_dimension": "Maatlijn",
             "place_connector": "Connector",
             "draw_table": "Tabel",
+            "place_node": "Knoop",
         }
         # De actieve tekenmodus krijgt het gevulde klei-accent; de tekst-prefix
         # is niet meer nodig omdat de kleur het onderscheid al maakt.
@@ -900,7 +901,7 @@ class UIBuilderMixin:
 
         top = ttk.Frame(self, padding=(8, 8, 8, 0))
         top.grid(row=0, column=2, sticky="ew")
-        top.columnconfigure(12, weight=1)
+        top.columnconfigure(13, weight=1)
         ttk.Button(top, textvariable=self.side_panel_toggle_text_var, command=self.toggle_side_panel).grid(row=0, column=0, sticky="w", padx=(0, 8))
         ttk.Label(top, text="Workflow", style="Subtle.TLabel").grid(row=0, column=1, sticky="w", padx=(0, 4))
         self._make_mode_button(top, "select", "Selecteer", 0, 2, padx=2)
@@ -909,15 +910,16 @@ class UIBuilderMixin:
         self._make_mode_button(top, "draw_dimension", "Maatlijn", 0, 5, padx=2)
         self._make_mode_button(top, "place_connector", "Connector", 0, 6, padx=2)
         self._make_mode_button(top, "draw_table", "Tabel", 0, 7, padx=2)
+        self._make_mode_button(top, "place_node", "Knoop", 0, 8, padx=2)
         fit_btn = ttk.Button(top, text="Fit", style="Tool.TButton", command=self.fit_page_to_view)
-        fit_btn.grid(row=0, column=8, padx=(12, 2))
+        fit_btn.grid(row=0, column=9, padx=(12, 2))
         attach_tooltip(fit_btn, "Blad passend in beeld (zoom-to-fit)")
-        ttk.Button(top, text="Zoom -", style="Tool.TButton", command=lambda: self.zoom_by(1 / 1.15)).grid(row=0, column=9, padx=2)
-        ttk.Button(top, text="Zoom +", style="Tool.TButton", command=lambda: self.zoom_by(1.15)).grid(row=0, column=10, padx=2)
-        ttk.Label(top, textvariable=self.mode_var, style="Status.TLabel").grid(row=0, column=11, sticky="w", padx=(10, 0))
+        ttk.Button(top, text="Zoom -", style="Tool.TButton", command=lambda: self.zoom_by(1 / 1.15)).grid(row=0, column=10, padx=2)
+        ttk.Button(top, text="Zoom +", style="Tool.TButton", command=lambda: self.zoom_by(1.15)).grid(row=0, column=11, padx=2)
+        ttk.Label(top, textvariable=self.mode_var, style="Status.TLabel").grid(row=0, column=12, sticky="w", padx=(10, 0))
 
         snap_row = ttk.Frame(top)
-        snap_row.grid(row=1, column=0, columnspan=13, sticky="ew", pady=(6, 0))
+        snap_row.grid(row=1, column=0, columnspan=14, sticky="ew", pady=(6, 0))
         snap_row.columnconfigure(8, weight=1)
         ttk.Button(snap_row, text="Undo", style="Tool.TButton", command=self.undo).grid(row=0, column=0, padx=(0, 3))
         ttk.Button(snap_row, text="Redo", style="Tool.TButton", command=self.redo).grid(row=0, column=1, padx=(0, 12))
@@ -1054,13 +1056,6 @@ class UIBuilderMixin:
         tools_menu.add_command(label="Selectie opslaan als blok...", command=self.save_selection_as_block)
         tools_menu.add_command(label="Blok invoegen", command=self.insert_selected_block)
         tools_menu.add_separator()
-        node_menu = tk.Menu(tools_menu, tearoff=0)
-        node_menu.add_command(label="Splice", command=lambda: self.begin_place_node("splice"))
-        node_menu.add_command(label="Massapunt", command=lambda: self.begin_place_node("ground"))
-        node_menu.add_command(label="Ringterminal", command=lambda: self.begin_place_node("ring"))
-        node_menu.add_command(label="Algemeen knooppunt", command=lambda: self.begin_place_node("generic"))
-        tools_menu.add_cascade(label="Knoop plaatsen", menu=node_menu)
-        tools_menu.add_separator()
         tools_menu.add_command(label="Eigenschappenpaneel focussen", command=self.focus_properties_panel)
         menu.add_cascade(label="Tools", menu=tools_menu)
 
@@ -1123,13 +1118,6 @@ class UIBuilderMixin:
         tools_menu.add_separator()
         tools_menu.add_command(label="Selectie opslaan als blok...", command=self.save_selection_as_block)
         tools_menu.add_command(label="Blok invoegen", command=self.insert_selected_block)
-        tools_menu.add_separator()
-        node_menu = tk.Menu(tools_menu, tearoff=0)
-        node_menu.add_command(label="Splice", command=lambda: self.begin_place_node("splice"))
-        node_menu.add_command(label="Massapunt", command=lambda: self.begin_place_node("ground"))
-        node_menu.add_command(label="Ringterminal", command=lambda: self.begin_place_node("ring"))
-        node_menu.add_command(label="Algemeen knooppunt", command=lambda: self.begin_place_node("generic"))
-        tools_menu.add_cascade(label="Knoop plaatsen", menu=node_menu)
         tools_menu.add_separator()
         tools_menu.add_command(label="Eigenschappenpaneel focussen", command=self.focus_properties_panel)
         menubar.add_cascade(label="Tools", menu=tools_menu)
