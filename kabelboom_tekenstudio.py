@@ -487,6 +487,9 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.table_resize_state: Optional[dict] = None
         self.connector_label_drag_state: Optional[dict] = None
         self.node_label_drag_state: Optional[dict] = None
+        # Draadeinden die geometrisch op een gesleepte knoop liggen en meebewegen
+        # (de knoop gedraagt zich dan als een echte junction): (wire_id, eindpunt-index, originele positie).
+        self._node_drag_attached: List[Tuple[str, int, Tuple[float, float]]] = []
         self.panning = False
         self.pan_start: Optional[Tuple[float, float]] = None
         self.cursor_world: Tuple[float, float] = (0.0, 0.0)
@@ -2278,6 +2281,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
     def _snap_candidate_signature_value(self) -> Tuple:
         return (
             tuple((round(c.x_mm, 4), round(c.y_mm, 4)) for c in self.connectors),
+            tuple((round(n.x_mm, 4), round(n.y_mm, 4)) for n in self.nodes),
             tuple(
                 (
                     w.wire_id,
@@ -2310,6 +2314,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         points: List[Tuple[float, float]] = []
         for c in self.connectors:
             points.append((c.x_mm, c.y_mm))
+        for n in self.nodes:
+            points.append((n.x_mm, n.y_mm))
         for w in self.wires:
             if len(w.points_mm) >= 2:
                 points.append(w.points_mm[0])
@@ -2549,6 +2555,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.table_resize_state = None
         self.connector_label_drag_state = None
         self.node_label_drag_state = None
+        self._node_drag_attached = []
         self.panning = False
         self.pan_start = None
         self.redraw()
@@ -6194,6 +6201,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             if obj:
                 self.drag_original_world = (obj.x_mm, obj.y_mm)
                 self.drag_original_points = None
+                self._node_drag_attached = self._wire_endpoints_at((obj.x_mm, obj.y_mm))
                 self._drag_history_before = self._capture_before_change()
                 self._drag_history_changed = False
         elif hit and hit[0] == "wire":
@@ -6267,7 +6275,10 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             return None
         if self.selected[0] == "wire" and self.drag_original_wire_points:
             return {("wire", wid) for wid in self.drag_original_wire_points}
-        return {(self.selected[0], self.selected[1])}
+        ids = {(self.selected[0], self.selected[1])}
+        if self.selected[0] == "node" and self._node_drag_attached:
+            ids.update(("wire", wid) for wid, _idx, _pt in self._node_drag_attached)
+        return ids
 
     def _drag_render_update(self):
         """Hertekenen tijdens een object-drag: incrementeel (alleen het versleepte object)
@@ -6541,6 +6552,15 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             if obj and self.drag_original_world:
                 obj.x_mm = self.drag_original_world[0] + dx
                 obj.y_mm = self.drag_original_world[1] + dy
+                # Vastgeklikte draadeinden bewegen mee → de knoop blijft een junction.
+                for wid, idx, (ox, oy) in self._node_drag_attached:
+                    w = self._find_wire(wid)
+                    if w and len(w.points_mm) >= 2:
+                        pts = list(w.points_mm)
+                        pts[0 if idx == 0 else -1] = (ox + dx, oy + dy)
+                        w.points_mm = pts
+                if self._node_drag_attached:
+                    self._clear_wire_geometry_caches()
                 self._drag_history_changed = True
         elif self.selected[0] == "wire":
             if self.drag_original_wire_points:
@@ -6621,6 +6641,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.drag_original_points = None
         self.drag_original_wire_points = None
         self.drag_original_items = None
+        self._node_drag_attached = []
         self.leader_endpoint_drag_state = None
         self.wire_endpoint_drag_state = None
         self.wire_tangent_drag_state = None
@@ -7054,6 +7075,19 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         r = NODE_RADIUS_MM
         return (node.x_mm - r, node.y_mm - r, node.x_mm + r, node.y_mm + r)
 
+    def _wire_endpoints_at(self, point: Tuple[float, float], tol_mm: float = 0.15) -> List[Tuple[str, int, Tuple[float, float]]]:
+        """Draadeinden die (vrijwel) samenvallen met ``point`` — bv. eindpunten die
+        op een knoop zijn gesnapt. Geeft (wire_id, eindpunt-index, originele positie)."""
+        hits: List[Tuple[str, int, Tuple[float, float]]] = []
+        for wire in self.wires:
+            if len(wire.points_mm) < 2:
+                continue
+            for idx in (0, -1):
+                ep = wire.points_mm[idx]
+                if math.hypot(ep[0] - point[0], ep[1] - point[1]) <= tol_mm:
+                    hits.append((wire.wire_id, idx, (ep[0], ep[1])))
+        return hits
+
     def _node_name_in_use(self, name: str, exclude_id: str) -> bool:
         """Of een andere knoop al deze (effectieve) naam draagt — label of, bij leeg
         label, de node-id. Hoofdletter-ongevoelig. Lege namen botsen nooit
@@ -7446,26 +7480,49 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 best = (connector_id, label)
         return best
 
+    def _nearest_node(self, node_points: List[Tuple[str, float, float]], point: Tuple[float, float], tol_mm: float) -> str:
+        """Node-id van de dichtstbijzijnde knoop binnen ``tol_mm``, of "" als geen."""
+        best_id = ""
+        best_dist = tol_mm
+        for nid, nx, ny in node_points:
+            d = math.hypot(point[0] - nx, point[1] - ny)
+            if d <= best_dist:
+                best_dist = d
+                best_id = nid
+        return best_id
+
     def derive_netlist_from_geometry(self, tol_mm: float = 4.0, announce: bool = True) -> int:
-        """Vul van/naar connector+pin van elke draad op basis van welke pin het
-        draadeinde geometrisch raakt. Geeft het aantal bijgewerkte koppelingen terug."""
+        """Vul van/naar van elke draad op basis van welke connector-pin óf knoop het
+        draadeinde geometrisch raakt. Een knoop heeft voorrang binnen tolerantie
+        (die is er bewust geplaatst). Geeft het aantal bijgewerkte koppelingen terug."""
         pins = self._all_pin_world_points()
-        if not pins:
+        node_points = [(n.node_id, n.x_mm, n.y_mm) for n in self.nodes]
+        if not pins and not node_points:
             if announce:
-                self._show_info("Geen connector-pins gevonden. Plaats eerst connectors met pins.")
+                self._show_info("Geen connector-pins of knopen gevonden. Plaats eerst connectors of knopen.")
             return 0
         before = self._capture_before_change()
         changed = 0
         for wire in self.wires:
             if len(wire.points_mm) < 2:
                 continue
-            start_pin = self._nearest_pin(pins, wire.points_mm[0], tol_mm)
-            end_pin = self._nearest_pin(pins, wire.points_mm[-1], tol_mm)
-            if start_pin and (wire.from_connector != start_pin[0] or wire.from_pin != start_pin[1]):
-                wire.from_connector, wire.from_pin = start_pin
+            start_node = self._nearest_node(node_points, wire.points_mm[0], tol_mm)
+            end_node = self._nearest_node(node_points, wire.points_mm[-1], tol_mm)
+            start_pin = None if start_node else self._nearest_pin(pins, wire.points_mm[0], tol_mm)
+            end_pin = None if end_node else self._nearest_pin(pins, wire.points_mm[-1], tol_mm)
+            if start_node:
+                if wire.from_node != start_node or wire.from_connector or wire.from_pin:
+                    wire.from_node, wire.from_connector, wire.from_pin = start_node, "", ""
+                    changed += 1
+            elif start_pin and (wire.from_connector != start_pin[0] or wire.from_pin != start_pin[1]):
+                wire.from_connector, wire.from_pin, wire.from_node = start_pin[0], start_pin[1], ""
                 changed += 1
-            if end_pin and (wire.to_connector != end_pin[0] or wire.to_pin != end_pin[1]):
-                wire.to_connector, wire.to_pin = end_pin
+            if end_node:
+                if wire.to_node != end_node or wire.to_connector or wire.to_pin:
+                    wire.to_node, wire.to_connector, wire.to_pin = end_node, "", ""
+                    changed += 1
+            elif end_pin and (wire.to_connector != end_pin[0] or wire.to_pin != end_pin[1]):
+                wire.to_connector, wire.to_pin, wire.to_node = end_pin[0], end_pin[1], ""
                 changed += 1
         if changed:
             self.redraw()
@@ -7473,7 +7530,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 self.load_selection_properties_to_panel()
             self._commit_change(before, "Netlist uit tekening afgeleid.")
         if announce:
-            self.status(f"Netlist afgeleid: {changed} koppeling(en) bijgewerkt op basis van pin-posities.")
+            self.status(f"Netlist afgeleid: {changed} koppeling(en) bijgewerkt op basis van pin-/knoop-posities.")
         return changed
 
     def _table_col_widths(self, table: TableBox) -> List[float]:

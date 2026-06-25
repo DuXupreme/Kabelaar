@@ -289,11 +289,18 @@ er allemaal op. Pas hierna kies je welke deliverables je er per doelgroep boveno
 > Headless geverifieerd (plaatsen/hit-test/slepen/dupliceren/verwijderen/undo, naam bewerken/
 > verslepen, dubbele-naam-blokkering, pan-move) + 6 unit-tests (51/51 groen).
 >
-> **`*` Resteert voor 8.2:** (1) draadeinden tijdens tekenen op een knoop *snappen* zodat
-> `from_node`/`to_node` automatisch gevuld worden — de echte connectiviteit-door-tekenen;
-> (2) connector-naam (id) ook in het paneel bewerkbaar maken (zelfde patroon, "geldt voor
-> alles met naam"); (3) zoom blijft zwaarder dan pan — diepere optimalisatie (proxy-bitmap)
-> als het nog hapert.
+> **Uitgevoerd (8.2 — snapping & junction-drag):** draadeinden **snappen nu naar knopen**
+> (knoop-centra in `_base_snap_candidates` + cache-signatuur). `derive_netlist_from_geometry`
+> linkt een draadeinde aan de dichtstbijzijnde **knoop óf pin** (knoop heeft voorrang binnen
+> tolerantie) en vult `from_node`/`to_node`. Een **knoop slepen neemt de erop gesnapte
+> draadeinden mee** (`_wire_endpoints_at` + `_node_drag_attached`; live in de incrementele
+> dragmove-laag) → de knoop gedraagt zich als een echte junction. Headless geverifieerd
+> (snap, derive-naar-knoop, junction-drag) + 3 unit-tests (53/53 groen).
+>
+> **`*` Resteert voor 8.2:** (1) connector-naam (id) ook in het paneel bewerkbaar maken
+> (zelfde patroon, "geldt voor alles met naam"); (2) auto from_node/to_node ook *tijdens*
+> tekenen i.p.v. alleen via de derive-actie; (3) zoom blijft zwaarder dan pan — diepere
+> optimalisatie (proxy-bitmap) als het nog hapert.
 
 > **Uitgevoerd (8.3):** nieuw `autosave.py` (pure helpers: pad/envelope/parsen/beschrijven,
 > los getest). De app schrijft elke 20 s een herstelbestand in de app-data map zolang er

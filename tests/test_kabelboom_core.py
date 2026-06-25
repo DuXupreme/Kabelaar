@@ -479,6 +479,7 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
         c1 = ConnectorInstance(connector_id="J1", symbol_name="sym", x_mm=0.0, y_mm=0.0, scale=1.0, pin_count=2)
         c2 = ConnectorInstance(connector_id="J2", symbol_name="sym", x_mm=100.0, y_mm=0.0, scale=1.0, pin_count=2)
         app.connectors = [c1, c2]
+        app.nodes = []
         pin_a = app._connector_pin_world_points(c1)[0]  # (label, x, y)
         pin_b = app._connector_pin_world_points(c2)[1]
         wire = WirePath(wire_id="W1", points_mm=[(pin_a[1], pin_a[2]), (pin_b[1], pin_b[2])])
@@ -492,6 +493,26 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
         self.assertEqual(changed, 2)
         self.assertEqual((wire.from_connector, wire.from_pin), ("J1", pin_a[0]))
         self.assertEqual((wire.to_connector, wire.to_pin), ("J2", pin_b[0]))
+
+    def test_derive_netlist_links_endpoint_to_node_with_precedence(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        app.symbols = {}
+        app.connectors = []
+        app.nodes = [Node(node_id="SP1", x_mm=50.0, y_mm=50.0)]
+        wire = WirePath(wire_id="W1", points_mm=[(50.0, 50.0), (90.0, 10.0)], from_connector="OUD", from_pin="9")
+        app.wires = [wire]
+        app.selected = None
+        app._capture_before_change = lambda: None
+        app._commit_change = lambda *a, **k: None
+        app.redraw = lambda *a, **k: None
+        app.status = lambda *a, **k: None
+
+        changed = app.derive_netlist_from_geometry(tol_mm=1.0, announce=False)
+
+        self.assertGreaterEqual(changed, 1)
+        self.assertEqual(wire.from_node, "SP1")
+        self.assertEqual(wire.from_connector, "")  # connector-koppeling wijkt voor de knoop
+        self.assertEqual(wire.from_pin, "")
 
     def test_paper_preset_detection(self):
         self.assertEqual(paper_preset_for_dimensions(420.0, 297.0), "IEC A3 liggend")
@@ -746,6 +767,18 @@ class Batch8ConnectivityFoundationTest(unittest.TestCase):
         self.assertEqual(app._node_label_world_pos(node), (105.0, 77.0))
         node.x_mm += 20.0  # object verschuift → naam blijft op dezelfde relatieve plek
         self.assertEqual(app._node_label_world_pos(node), (125.0, 77.0))
+
+    def test_wire_endpoints_at_finds_coincident_endpoints(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        app.wires = [
+            WirePath(wire_id="W1", points_mm=[(100.0, 80.0), (60.0, 80.0)]),
+            WirePath(wire_id="W2", points_mm=[(140.0, 40.0), (100.05, 80.0)]),  # binnen tol
+            WirePath(wire_id="W3", points_mm=[(0.0, 0.0), (10.0, 0.0)]),
+        ]
+        found = {(wid, idx) for wid, idx, _pt in app._wire_endpoints_at((100.0, 80.0))}
+        self.assertIn(("W1", 0), found)
+        self.assertIn(("W2", -1), found)
+        self.assertNotIn(("W3", 0), found)
 
     def test_node_name_uniqueness_is_case_insensitive_and_ignores_empty(self):
         app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
