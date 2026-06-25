@@ -242,6 +242,9 @@ class RenderingMixin:
             x1, y1 = self.world_to_canvas(bx1 - 1.0, by1 - 1.0)
             x2, y2 = self.world_to_canvas(bx2 + 1.0, by2 + 1.0)
             self.canvas.create_rectangle(x1, y1, x2, y2, outline="#d61f1f", dash=(4, 4), width=2)
+            # Oranje handle rond de naam zodat die los versleepbaar is (zoals bij connectors).
+            lbx1, lby1, lbx2, lby2 = self._node_label_canvas_bbox(node)
+            self.canvas.create_rectangle(lbx1, lby1, lbx2, lby2, outline="#f08c00", dash=(2, 2), width=1)
 
         for note in self.image_notes:
             if self._is_item_selected("image", note.image_id) and not self._drag_render_skip("image", note.image_id):
@@ -412,14 +415,15 @@ class RenderingMixin:
                     for px, py in pts:
                         flat.extend(self.world_to_canvas(px, py))
                     self.canvas.create_line(*flat, fill=col, width=max(1.0, width_mm * self.zoom))
-            label = node.label or node.node_id
-            lx, ly = self.world_to_canvas(node.x_mm, node.y_mm - NODE_RADIUS_MM - 1.0)
-            self.canvas.create_text(lx, ly, text=label, fill="#0d2238", font=("Segoe UI", 8), anchor="s")
+            lx, ly = self.world_to_canvas(*self._node_label_world_pos(node))
+            self.canvas.create_text(lx, ly, text=self._node_label_text(node), fill="#0d2238", font=("Segoe UI", 8), anchor="center")
             if self._is_item_selected("node", node.node_id):
                 bx1, by1, bx2, by2 = self._node_world_bbox(node)
                 sx1, sy1 = self.world_to_canvas(bx1 - 1.0, by1 - 1.0)
                 sx2, sy2 = self.world_to_canvas(bx2 + 1.0, by2 + 1.0)
                 self.canvas.create_rectangle(sx1, sy1, sx2, sy2, outline="#d61f1f", dash=(4, 4), width=2)
+                lbx1, lby1, lbx2, lby2 = self._node_label_canvas_bbox(node)
+                self.canvas.create_rectangle(lbx1, lby1, lbx2, lby2, outline="#f08c00", dash=(2, 2), width=1)
 
     def _draw_connectors(self):
         if not self.connectors:

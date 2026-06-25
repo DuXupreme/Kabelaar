@@ -155,6 +155,8 @@ class Node:
     y_mm: float = 0.0
     label: str = ""
     color: str = "#2a3550"
+    label_dx_mm: float = 0.0  # naam-offset t.o.v. de knoop (blijft mee bij verplaatsen)
+    label_dy_mm: float = -4.0
 
 
 def normalize_node_kind(kind: str) -> str:

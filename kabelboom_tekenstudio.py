@@ -486,6 +486,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.wire_curve_drag_state: Optional[dict] = None
         self.table_resize_state: Optional[dict] = None
         self.connector_label_drag_state: Optional[dict] = None
+        self.node_label_drag_state: Optional[dict] = None
         self.panning = False
         self.pan_start: Optional[Tuple[float, float]] = None
         self.cursor_world: Tuple[float, float] = (0.0, 0.0)
@@ -586,6 +587,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self._aa_viewport_pil = None
         self._aa_zoom_preview = False
         self._aa_zoom_settle_after_id = None
+        self._pan_settle_after_id = None
         self._aa_render_error = ""
         self._redraw_interval_ms = 16
         self._redraw_scheduled = False
@@ -1612,8 +1614,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 elif shape == "polyline":
                     pts, col, width_mm = prim[1], prim[2], prim[3]
                     draw_polyline(pts, col, mm_width_to_px(width_mm, scale=0.4))
-            label = node.label or node.node_id
-            draw_anchored_text(mm_to_px_x(node.x_mm), mm_to_px_y(node.y_mm - NODE_RADIUS_MM - 1.0), label, "#0d2238", font_wire, anchor="ms")
+            label_x, label_y = self._node_label_world_pos(node)
+            draw_anchored_text(mm_to_px_x(label_x), mm_to_px_y(label_y), self._node_label_text(node), "#0d2238", font_wire, anchor="mm")
 
         for l in self.leaders:
             if self._drag_render_skip("leader", l.leader_id):
@@ -2546,6 +2548,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.wire_curve_drag_state = None
         self.table_resize_state = None
         self.connector_label_drag_state = None
+        self.node_label_drag_state = None
         self.panning = False
         self.pan_start = None
         self.redraw()
@@ -3518,6 +3521,14 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         if not items:
             self.status("Geen selectie om eigenschappen op toe te passen.")
             return
+        # Dubbele knoop-namen blokkeren vóór er iets wijzigt.
+        if len(items) == 1:
+            only_kind, only_id = next(iter(items))
+            if only_kind == "node":
+                new_name = self.prop_text_var.get().strip()
+                if new_name and self._node_name_in_use(new_name, only_id):
+                    self._show_error(f"Er bestaat al een knoop met de naam '{new_name}'. Kies een unieke naam.")
+                    return
         before = self._capture_before_change()
         color = self.prop_color_var.get().strip()
         color_b = self.prop_color_b_var.get().strip()
@@ -4147,12 +4158,19 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 self.after_cancel(self._aa_zoom_settle_after_id)
             except tk.TclError:
                 pass
-        self.redraw()
+        # Gecoalesceerde preview (max ~60 fps) i.p.v. een synchrone resize per
+        # wheel-tick; snelle scroll-bursts vallen zo samen tot één hertekening.
+        self.request_redraw()
         self._aa_zoom_settle_after_id = self.after(120, self._finish_aa_zoom_settle)
 
     def _finish_aa_zoom_settle(self):
         self._aa_zoom_settle_after_id = None
         self._aa_zoom_preview = False
+        if self.canvas.winfo_exists():
+            self.redraw()
+
+    def _finish_pan_settle(self):
+        self._pan_settle_after_id = None
         if self.canvas.winfo_exists():
             self.redraw()
 
@@ -6029,6 +6047,10 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             if label_conn:
                 self._begin_connector_label_drag(label_conn, raw_world)
                 return
+            label_node = self._node_label_handle_hit(raw_world)
+            if label_node:
+                self._begin_node_label_drag(label_node, raw_world)
+                return
             if self.selected and self.selected[0] == "wire":
                 endpoint_hit = self._wire_endpoint_handle_hit(raw_world)
                 if endpoint_hit:
@@ -6476,6 +6498,24 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             self.request_redraw()
             return
 
+        if self.node_label_drag_state:
+            state = self.node_label_drag_state
+            node = self._find_node(state["node_id"])
+            if not node:
+                self.node_label_drag_state = None
+                return
+            cur = self.canvas_to_world(event.x, event.y)
+            start = self.drag_start_world or cur
+            dx = cur[0] - start[0]
+            dy = cur[1] - start[1]
+            label0 = state["label0"]
+            node.label_dx_mm = round(label0[0] + dx, 3)
+            node.label_dy_mm = round(label0[1] + dy, 3)
+            self._drag_history_changed = True
+            self.status(f"Naam {self._node_label_text(node)}: offset x={node.label_dx_mm:.1f} mm, y={node.label_dy_mm:.1f} mm")
+            self.request_redraw()
+            return
+
         if self.mode != "select":
             return
         if not self.selected or not self.drag_start_world:
@@ -6554,6 +6594,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         had_tangent_drag = self.wire_tangent_drag_state is not None
         had_curve_drag = self.wire_curve_drag_state is not None
         had_label_drag = self.connector_label_drag_state is not None
+        had_node_label_drag = self.node_label_drag_state is not None
         if self.wire_endpoint_drag_state:
             state = self.wire_endpoint_drag_state
             wire = self._find_wire(state["wire_id"])
@@ -6586,7 +6627,11 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.wire_curve_drag_state = None
         self.table_resize_state = None
         self.connector_label_drag_state = None
+        self.node_label_drag_state = None
         if had_label_drag and self.selected and self.selected[0] == "connector":
+            self.load_selection_properties_to_panel()
+            self.request_redraw()
+        if had_node_label_drag and self.selected and self.selected[0] == "node":
             self.load_selection_properties_to_panel()
             self.request_redraw()
         if had_leader_endpoint_drag and self.selected and self.selected[0] == "leader":
@@ -6908,16 +6953,20 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.pan_x += dx
         self.pan_y += dy
         self.pan_start = (event.x, event.y)
-        # Tijdens het pannen de goedkope (bilineaire) AA-preview gebruiken i.p.v. een
-        # dure LANCZOS-resize per frame; pas na stilstand (settle) weer scherp renderen.
-        self._aa_zoom_preview = True
-        if self._aa_zoom_settle_after_id is not None:
+        # Pannen is bijna gratis: verschuif de reeds getekende canvas-items mee
+        # i.p.v. de AA-scène per frame opnieuw te renderen/herschalen. Pas na
+        # stilstand één scherpe, volledige redraw (die ook de randen invult).
+        self._cancel_pending_redraw()
+        try:
+            self.canvas.move("all", dx, dy)
+        except tk.TclError:
+            pass
+        if self._pan_settle_after_id is not None:
             try:
-                self.after_cancel(self._aa_zoom_settle_after_id)
+                self.after_cancel(self._pan_settle_after_id)
             except tk.TclError:
                 pass
-        self._aa_zoom_settle_after_id = self.after(140, self._finish_aa_zoom_settle)
-        self.request_redraw()
+        self._pan_settle_after_id = self.after(90, self._finish_pan_settle)
 
     def on_middle_up(self, _event):
         self.panning = False
@@ -7004,6 +7053,21 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
     def _node_world_bbox(self, node: Node) -> Tuple[float, float, float, float]:
         r = NODE_RADIUS_MM
         return (node.x_mm - r, node.y_mm - r, node.x_mm + r, node.y_mm + r)
+
+    def _node_name_in_use(self, name: str, exclude_id: str) -> bool:
+        """Of een andere knoop al deze (effectieve) naam draagt — label of, bij leeg
+        label, de node-id. Hoofdletter-ongevoelig. Lege namen botsen nooit
+        (die vallen terug op de altijd-unieke node-id)."""
+        target = name.strip().lower()
+        if not target:
+            return False
+        for n in self.nodes:
+            if n.node_id == exclude_id:
+                continue
+            effective = (n.label or n.node_id).strip().lower()
+            if effective == target:
+                return True
+        return False
 
     def _find_table(self, table_id: str) -> Optional[TableBox]:
         for t in self.tables:
@@ -7265,6 +7329,56 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         if x1 <= px <= x2 and y1 <= py <= y2:
             return conn
         return None
+
+    def _node_label_text(self, node) -> str:
+        return node.label or node.node_id
+
+    def _node_label_world_pos(self, node) -> Tuple[float, float]:
+        return (node.x_mm + node.label_dx_mm, node.y_mm + node.label_dy_mm)
+
+    def _node_label_canvas_bbox(self, node) -> Tuple[float, float, float, float]:
+        cx, cy = self.world_to_canvas(*self._node_label_world_pos(node))
+        text = self._node_label_text(node)
+        half_w = max(9.0, len(text) * 4.0 + 4.0)
+        half_h = 8.0
+        return (cx - half_w, cy - half_h, cx + half_w, cy + half_h)
+
+    def _node_label_handle_hit(self, world: Tuple[float, float]) -> Optional[Node]:
+        """Geef de knoop terug waarvan het naamlabel onder het wereldpunt ligt
+        (alleen voor de geselecteerde knoop, zodat de handle zichtbaar is)."""
+        if not self.selected or self.selected[0] != "node":
+            return None
+        node = self._find_node(self.selected[1])
+        if not node:
+            return None
+        px, py = self.world_to_canvas(world[0], world[1])
+        x1, y1, x2, y2 = self._node_label_canvas_bbox(node)
+        if x1 <= px <= x2 and y1 <= py <= y2:
+            return node
+        return None
+
+    def _begin_node_label_drag(self, node: Node, world: Tuple[float, float]):
+        self._set_single_selection("node", node.node_id)
+        self.load_selection_properties_to_panel()
+        self.drag_start_world = world
+        self.drag_original_world = None
+        self.drag_original_points = None
+        self.drag_original_wire_points = None
+        self.drag_original_items = None
+        self.leader_endpoint_drag_state = None
+        self.wire_endpoint_drag_state = None
+        self.wire_tangent_drag_state = None
+        self.wire_curve_drag_state = None
+        self.table_resize_state = None
+        self.connector_label_drag_state = None
+        self.node_label_drag_state = {
+            "node_id": node.node_id,
+            "label0": (node.label_dx_mm, node.label_dy_mm),
+        }
+        self._drag_history_before = self._capture_before_change()
+        self._drag_history_changed = False
+        self.request_redraw()
+        self.status(f"Sleep de naam van {self._node_label_text(node)} naar de gewenste positie.")
 
     def _symbol_raw_bbox(self, sym: StepSymbol) -> Tuple[float, float, float, float]:
         xs: List[float] = []
@@ -8026,8 +8140,9 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                     kind=obj.kind,
                     x_mm=obj.x_mm + dx,
                     y_mm=obj.y_mm + dy,
-                    label=obj.label,
                     color=obj.color,
+                    label_dx_mm=obj.label_dx_mm,
+                    label_dy_mm=obj.label_dy_mm,
                 )
             )
             self._set_single_selection("node", nid)

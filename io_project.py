@@ -294,6 +294,8 @@ class ProjectIOMixin:
                         y_mm=float(raw.get("y_mm", 0.0)),
                         label=str(raw.get("label", "")),
                         color=str(raw.get("color", "#2a3550")),
+                        label_dx_mm=float(raw.get("label_dx_mm", 0.0)),
+                        label_dy_mm=float(raw.get("label_dy_mm", -4.0)),
                     )
                 )
             except Exception:

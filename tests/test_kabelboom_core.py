@@ -740,6 +740,22 @@ class Batch8ConnectivityFoundationTest(unittest.TestCase):
         self.assertAlmostEqual((by1 + by2) / 2.0, 25.0)
         self.assertGreater(bx2 - bx1, 0.0)
 
+    def test_node_label_offset_tracks_object_position(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        node = Node(node_id="N1", x_mm=100.0, y_mm=80.0, label_dx_mm=5.0, label_dy_mm=-3.0)
+        self.assertEqual(app._node_label_world_pos(node), (105.0, 77.0))
+        node.x_mm += 20.0  # object verschuift → naam blijft op dezelfde relatieve plek
+        self.assertEqual(app._node_label_world_pos(node), (125.0, 77.0))
+
+    def test_node_name_uniqueness_is_case_insensitive_and_ignores_empty(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        app.nodes = [Node(node_id="N001", label="GND"), Node(node_id="N002", label="")]
+        self.assertTrue(app._node_name_in_use("gnd", exclude_id="N002"))   # botst met N001's label
+        self.assertTrue(app._node_name_in_use("N002", exclude_id="N001"))  # leeg label → effectieve naam = id
+        self.assertFalse(app._node_name_in_use("GND", exclude_id="N001"))  # zichzelf telt niet
+        self.assertFalse(app._node_name_in_use("uniek", exclude_id="N002"))
+        self.assertFalse(app._node_name_in_use("", exclude_id="N002"))     # leeg botst nooit
+
 
 class Batch8AutosaveTest(unittest.TestCase):
     def test_recovery_path_lives_in_appdata_dir(self):

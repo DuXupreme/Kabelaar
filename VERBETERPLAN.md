@@ -273,18 +273,27 @@ er allemaal op. Pas hierna kies je welke deliverables je er per doelgroep boveno
 > hun bestaan en onderdrukt de "meerdere draden"-waarschuwing op splices. 6 nieuwe tests
 > (43/43 groen) + headless save/load-round-trip met een splice en een v1→v2-load.
 >
-> **Uitgevoerd (8.2 — UI):** knopen zijn nu een eersteklas objecttype. Plaatsen via
-> `Tools ▸ Knoop plaatsen` (splice/massa/ring/algemeen), met een eigen glyph per type — gedeeld
-> tussen de AA-pagina (`_render_page_image`) en de Tk-fallback via `_node_glyph_primitives`.
-> Selecteren, slepen (incrementeel, hooks op `_drag_*`), box-select, dupliceren en verwijderen
-> werken; een verwijderde knoop maakt verwijzende draadeinden los. Undo, IO en de scene-cache
-> lopen mee omdat knopen in `_project_dict` zitten. Headless geverifieerd (plaatsen/hit-test/
-> slepen/dupliceren/verwijderen/undo + pixelcheck dat de glyph rendert) + 2 unit-tests (49/49 groen).
+> **Uitgevoerd (8.2 — UI):** knopen zijn nu een eersteklas objecttype. Plaatsen via de
+> **workflowbalk-knop "Knoop"** of het **rechtermuisknop-menu "Knoop plaatsen hier"**
+> (splice/massa/ring/algemeen), met een eigen glyph per type — gedeeld tussen de AA-pagina
+> (`_render_page_image`) en de Tk-fallback via `_node_glyph_primitives`. Selecteren, slepen
+> (incrementeel), box-select, dupliceren en verwijderen werken; een verwijderde knoop maakt
+> verwijzende draadeinden los. Undo, IO en de scene-cache lopen mee (knopen in `_project_dict`).
 >
-> **`*` Resteert voor 8.2 (afgebakende vervolgstappen):** (1) draadeinden tijdens tekenen op een
-> knoop *snappen* zodat `from_node`/`to_node` automatisch gevuld worden — dat is de echte
-> connectiviteit-door-tekenen; (2) type/label/kleur van een knoop in het eigenschappenpaneel
-> bewerken (nu alleen instelbaar bij plaatsing).
+> **Uitgevoerd (8.2 — feedbackronde):** knoop-**naam bewerkbaar in het eigenschappenpaneel**;
+> **type** via rechtermuisknop. Naam **los versleepbaar** met een relatieve offset
+> (`label_dx_mm`/`label_dy_mm`, gespiegeld van de connector-naam) die behouden blijft bij het
+> verplaatsen van de knoop. **Dubbele knoop-namen geblokkeerd** (hoofdletter-ongevoelig;
+> `_node_name_in_use`). **Pan-perf**: pannen verschuift nu de canvas-items (`canvas.move`) met
+> een scherpe na-render bij stilstand i.p.v. een resize per frame; zoom-preview gecoalesceerd.
+> Headless geverifieerd (plaatsen/hit-test/slepen/dupliceren/verwijderen/undo, naam bewerken/
+> verslepen, dubbele-naam-blokkering, pan-move) + 6 unit-tests (51/51 groen).
+>
+> **`*` Resteert voor 8.2:** (1) draadeinden tijdens tekenen op een knoop *snappen* zodat
+> `from_node`/`to_node` automatisch gevuld worden — de echte connectiviteit-door-tekenen;
+> (2) connector-naam (id) ook in het paneel bewerkbaar maken (zelfde patroon, "geldt voor
+> alles met naam"); (3) zoom blijft zwaarder dan pan — diepere optimalisatie (proxy-bitmap)
+> als het nog hapert.
 
 > **Uitgevoerd (8.3):** nieuw `autosave.py` (pure helpers: pad/envelope/parsen/beschrijven,
 > los getest). De app schrijft elke 20 s een herstelbestand in de app-data map zolang er
