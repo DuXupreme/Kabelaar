@@ -533,9 +533,11 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         self.wire_bridge_clearance_var = tk.StringVar(value=f"{self.wire_bridge_clearance_mm:g}")
         self.ui_scale_var = tk.StringVar(value=f"{self._ui_scale_percent}%")
         self.prop_wire_move_scope_var = tk.StringVar(value=wire_move_scope_label("chain"))
-        self.prop_wire_endpoint_drag_scope_var = tk.StringVar(value=wire_endpoint_drag_scope_label("single"))
+        self.prop_wire_endpoint_drag_scope_var = tk.StringVar(value=wire_endpoint_drag_scope_label("junction"))
         self.wire_move_scope = "chain"
-        self.wire_endpoint_drag_scope = "single"
+        # Standaard houden kruispunten bij elkaar: een eindpunt slepen neemt de
+        # aangesloten uiteinden mee (consistent met 'lijf slepen = hele lijn').
+        self.wire_endpoint_drag_scope = "junction"
         self.side_panel_visible_var = tk.BooleanVar(value=self._settings_bool("side_panel_visible", True))
         visible_panels = self.settings.get("visible_panels", {})
         collapsed_panels = self.settings.get("collapsed_panels", {})
