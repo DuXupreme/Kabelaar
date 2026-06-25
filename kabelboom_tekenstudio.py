@@ -5963,20 +5963,22 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 self._history_replaying = False
             return None
         wire_id = self._next_id("W", [w.wire_id for w in self.wires])
-        self.wires.append(
-            WirePath(
-                wire_id=wire_id,
-                points_mm=[actual_start, actual_end],
-                color=self.default_wire_color,
-                color_b=self.default_wire_color_b,
-                width_mm=self.default_wire_width_mm,
-                style=self.default_wire_style,
-                curve_offset_mm=self.default_wire_curve_offset_mm,
-                twist_pitch_mm=self.default_wire_twist_pitch_mm,
-                pair_gap_mm=self.default_wire_pair_gap_mm,
-                label="",
-            )
+        new_wire = WirePath(
+            wire_id=wire_id,
+            points_mm=[actual_start, actual_end],
+            color=self.default_wire_color,
+            color_b=self.default_wire_color_b,
+            width_mm=self.default_wire_width_mm,
+            style=self.default_wire_style,
+            curve_offset_mm=self.default_wire_curve_offset_mm,
+            twist_pitch_mm=self.default_wire_twist_pitch_mm,
+            pair_gap_mm=self.default_wire_pair_gap_mm,
+            label="",
         )
+        self.wires.append(new_wire)
+        # Auto-koppel uiteinden die op een knoop/pin vallen → from_node/to_node of
+        # from_connector/from_pin al tijdens het tekenen i.p.v. pas via de derive-actie.
+        self._link_wire_endpoints(new_wire, tol_mm=1.5)
         self._set_primary_wire_selection(wire_id)
         self.load_selection_properties_to_panel()
         self._commit_change(before)
@@ -7493,6 +7495,43 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 best_id = nid
         return best_id
 
+    def _link_wire_endpoints(
+        self,
+        wire: WirePath,
+        pins: Optional[List[Tuple[str, str, float, float]]] = None,
+        node_points: Optional[List[Tuple[str, float, float]]] = None,
+        tol_mm: float = 4.0,
+    ) -> int:
+        """Koppel beide uiteinden van ``wire`` aan de dichtstbijzijnde knoop óf
+        connector-pin binnen ``tol_mm`` (knoop heeft voorrang). Geeft het aantal
+        gewijzigde koppelingen terug. Gedeeld door de derive-actie en het tekenen."""
+        if len(wire.points_mm) < 2:
+            return 0
+        if pins is None:
+            pins = self._all_pin_world_points()
+        if node_points is None:
+            node_points = [(n.node_id, n.x_mm, n.y_mm) for n in self.nodes]
+        changed = 0
+        start_node = self._nearest_node(node_points, wire.points_mm[0], tol_mm)
+        end_node = self._nearest_node(node_points, wire.points_mm[-1], tol_mm)
+        start_pin = None if start_node else self._nearest_pin(pins, wire.points_mm[0], tol_mm)
+        end_pin = None if end_node else self._nearest_pin(pins, wire.points_mm[-1], tol_mm)
+        if start_node:
+            if wire.from_node != start_node or wire.from_connector or wire.from_pin:
+                wire.from_node, wire.from_connector, wire.from_pin = start_node, "", ""
+                changed += 1
+        elif start_pin and (wire.from_connector != start_pin[0] or wire.from_pin != start_pin[1]):
+            wire.from_connector, wire.from_pin, wire.from_node = start_pin[0], start_pin[1], ""
+            changed += 1
+        if end_node:
+            if wire.to_node != end_node or wire.to_connector or wire.to_pin:
+                wire.to_node, wire.to_connector, wire.to_pin = end_node, "", ""
+                changed += 1
+        elif end_pin and (wire.to_connector != end_pin[0] or wire.to_pin != end_pin[1]):
+            wire.to_connector, wire.to_pin, wire.to_node = end_pin[0], end_pin[1], ""
+            changed += 1
+        return changed
+
     def derive_netlist_from_geometry(self, tol_mm: float = 4.0, announce: bool = True) -> int:
         """Vul van/naar van elke draad op basis van welke connector-pin óf knoop het
         draadeinde geometrisch raakt. Een knoop heeft voorrang binnen tolerantie
@@ -7506,26 +7545,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         before = self._capture_before_change()
         changed = 0
         for wire in self.wires:
-            if len(wire.points_mm) < 2:
-                continue
-            start_node = self._nearest_node(node_points, wire.points_mm[0], tol_mm)
-            end_node = self._nearest_node(node_points, wire.points_mm[-1], tol_mm)
-            start_pin = None if start_node else self._nearest_pin(pins, wire.points_mm[0], tol_mm)
-            end_pin = None if end_node else self._nearest_pin(pins, wire.points_mm[-1], tol_mm)
-            if start_node:
-                if wire.from_node != start_node or wire.from_connector or wire.from_pin:
-                    wire.from_node, wire.from_connector, wire.from_pin = start_node, "", ""
-                    changed += 1
-            elif start_pin and (wire.from_connector != start_pin[0] or wire.from_pin != start_pin[1]):
-                wire.from_connector, wire.from_pin, wire.from_node = start_pin[0], start_pin[1], ""
-                changed += 1
-            if end_node:
-                if wire.to_node != end_node or wire.to_connector or wire.to_pin:
-                    wire.to_node, wire.to_connector, wire.to_pin = end_node, "", ""
-                    changed += 1
-            elif end_pin and (wire.to_connector != end_pin[0] or wire.to_pin != end_pin[1]):
-                wire.to_connector, wire.to_pin, wire.to_node = end_pin[0], end_pin[1], ""
-                changed += 1
+            changed += self._link_wire_endpoints(wire, pins=pins, node_points=node_points, tol_mm=tol_mm)
         if changed:
             self.redraw()
             if self.selected and self.selected[0] == "wire":

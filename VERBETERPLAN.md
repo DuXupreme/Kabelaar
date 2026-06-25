@@ -243,7 +243,7 @@ kernelkeuze gevalideerd is.
 
 ---
 
-## Batch 8 — Professioneel fundament: connectiviteit als bron 🔴 ⏳ BEZIG (8.1 ✅ · 8.2 model+UI ✅* · 8.3 ✅)
+## Batch 8 — Professioneel fundament: connectiviteit als bron 🔴 ⏳ BEZIG (8A ✅: 8.1 · 8.2 · 8.3 — nu 8B: bundels/formboard)
 
 **Doel:** de structurele sprong van "nette tekentool" naar "tool die een harness-engineer
 vertrouwt en verkiest". Niet méér op het blad, maar een **diepere onderlaag**: connectiviteit
@@ -297,10 +297,19 @@ er allemaal op. Pas hierna kies je welke deliverables je er per doelgroep boveno
 > dragmove-laag) → de knoop gedraagt zich als een echte junction. Headless geverifieerd
 > (snap, derive-naar-knoop, junction-drag) + 3 unit-tests (53/53 groen).
 >
-> **`*` Resteert voor 8.2:** (1) connector-naam (id) ook in het paneel bewerkbaar maken
-> (zelfde patroon, "geldt voor alles met naam"); (2) auto from_node/to_node ook *tijdens*
-> tekenen i.p.v. alleen via de derive-actie; (3) zoom blijft zwaarder dan pan — diepere
-> optimalisatie (proxy-bitmap) als het nog hapert.
+> **Uitgevoerd (8.2 — auto-koppelen tijdens tekenen):** een nieuw segment koppelt zijn
+> uiteinden meteen aan de knoop/pin waar ze op vallen (`_link_wire_endpoints`, gedeeld met de
+> derive-actie; aangeroepen in `_add_wire_segment`, tol 1,5 mm) → `from_node`/`to_node` of
+> `from_connector`/`from_pin` zonder de derive-actie te draaien. **Connector-naam in het paneel**
+> bleek al te bestaan (`_rename_selected_connector` op rij 0: hernoemt, werkt draadverwijzingen
+> bij, blokkeert duplicaten) — headless bevestigd. 1 nieuwe unit-test (54/54 groen).
+>
+> **`*` Resteert voor 8.2:** zoom blijft zwaarder dan pan — een proxy-bitmap-optimalisatie
+> (de laatste viewport-bitmap herschalen tijdens het zoomen i.p.v. de supersample-bron
+> opnieuw croppen) staat klaar als losse stap, te doen als het nog hapert.
+
+**Volgende keuze (na 8.2):** branch mergen naar `main`, óf door naar **8.4 bundels met
+auto-diameter** en **8.5 formboard** (de eerste echte productie-deliverable).
 
 > **Uitgevoerd (8.3):** nieuw `autosave.py` (pure helpers: pad/envelope/parsen/beschrijven,
 > los getest). De app schrijft elke 20 s een herstelbestand in de app-data map zolang er

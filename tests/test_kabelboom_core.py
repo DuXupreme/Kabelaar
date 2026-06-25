@@ -768,6 +768,21 @@ class Batch8ConnectivityFoundationTest(unittest.TestCase):
         node.x_mm += 20.0  # object verschuift → naam blijft op dezelfde relatieve plek
         self.assertEqual(app._node_label_world_pos(node), (125.0, 77.0))
 
+    def test_link_wire_endpoints_prefers_node_then_pin(self):
+        app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
+        app.nodes = [Node(node_id="SP1", x_mm=10.0, y_mm=10.0)]
+        wire = WirePath(wire_id="W1", points_mm=[(10.0, 10.0), (90.0, 90.0)])
+
+        changed = app._link_wire_endpoints(
+            wire, pins=[("J1", "3", 90.0, 90.0)], node_points=[("SP1", 10.0, 10.0)], tol_mm=1.0
+        )
+
+        self.assertEqual(changed, 2)
+        self.assertEqual(wire.from_node, "SP1")  # knoop heeft voorrang
+        self.assertEqual(wire.from_connector, "")
+        self.assertEqual((wire.to_connector, wire.to_pin), ("J1", "3"))  # pin waar geen knoop is
+        self.assertEqual(wire.to_node, "")
+
     def test_wire_endpoints_at_finds_coincident_endpoints(self):
         app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
         app.wires = [
