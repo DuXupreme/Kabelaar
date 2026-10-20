@@ -16,10 +16,11 @@ public enum CavityState { Unspecified, Occupied, Unused, Plugged }
 public enum LengthSource { RouteAndAllowances, Manual }
 public enum AnnotationKind { Text, Line, Arc, Leader, Dimension, Image, WireTable, PinTable, BomTable, RevisionTable }
 public enum DimensionDirection { Aligned, Horizontal, Vertical }
+public enum TwistDisplayMode { Full, Markers, Parallel }
 
 public sealed class HarnessProject
 {
-    public const int CurrentSchemaVersion = 1;
+    public const int CurrentSchemaVersion = 2;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Id { get; set; } = Ids.New();
     public string Title { get; set; } = "Nieuwe kabelboom";
@@ -208,9 +209,26 @@ public sealed class DrawingView
     public LayoutMode Mode { get; set; } = LayoutMode.Scaled;
     public Point2 Origin { get; set; } = new(20, 20);
     public double Scale { get; set; } = 1;
+    public DrawingStyle Style { get; set; } = new();
     public List<PlacedComponent> Components { get; set; } = [];
     public List<PlacedRoute> Routes { get; set; } = [];
     public List<Annotation> Annotations { get; set; } = [];
+}
+/// <summary>Presentation settings only; none of these values determine production lengths or twist specifications.</summary>
+public sealed class DrawingStyle
+{
+    public bool ShowWireLabels { get; set; } = true;
+    public bool ShowTwistLabels { get; set; } = true;
+    public double WireLineWidthMm { get; set; } = 0.45;
+    public bool UseWireSectionWidth { get; set; }
+    public double WireLabelFontSizeMm { get; set; } = 2.2;
+    public double ConnectorLineWidthMm { get; set; } = 0.3;
+    public double TwistAmplitudeMm { get; set; } = 1.1;
+    /// <summary>Zero follows the group's specified pitch; a positive value controls the drawing only.</summary>
+    public double TwistDisplayPitchMm { get; set; }
+    public TwistDisplayMode TwistDisplayMode { get; set; } = TwistDisplayMode.Full;
+
+    public DrawingStyle Copy() => (DrawingStyle)MemberwiseClone();
 }
 public sealed class PlacedComponent
 {
@@ -218,6 +236,13 @@ public sealed class PlacedComponent
     public string EntityId { get; set; } = "";
     public Point2 Position { get; set; }
     public double RotationDegrees { get; set; }
+    /// <summary>Symbol and pin display scale in a free view, independent of the library's physical geometry.</summary>
+    public double DisplayScale { get; set; } = 1;
+    public bool ShowPins { get; set; } = true;
+    public bool ShowPinNumbers { get; set; } = true;
+    public bool ShowLabel { get; set; } = true;
+    public bool ShowPartNumber { get; set; } = true;
+    public double LabelFontSizeMm { get; set; } = 3;
     public Point2 LabelOffset { get; set; } = new(0, -10);
     public string LayerId { get; set; } = "main";
 }

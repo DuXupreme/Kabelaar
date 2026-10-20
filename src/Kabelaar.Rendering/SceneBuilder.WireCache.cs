@@ -8,7 +8,8 @@ public static partial class SceneBuilder
 {
     private readonly record struct WireAppearance(string ViewId, Point2 Origin, double Scale, string Layer,
         string? PlacementId, bool Locked, string Name, string ColorCode, string Color, double CrossSection,
-        bool Twisted, bool FreeStart, bool FreeEnd);
+        bool Twisted, bool FreeStart, bool FreeEnd, double LineWidth, bool ShowLabel, double LabelFontSize,
+        Point2 LabelPosition, Point2 LabelAnchor);
     private sealed record WireProjection(IReadOnlyList<Point2> Source, WireAppearance Appearance, ScenePrimitive[] Primitives);
     private static readonly ConditionalWeakTable<DrawingView, Dictionary<string, WireProjection>> WireProjectionCache = new();
 
@@ -26,14 +27,31 @@ public static partial class SceneBuilder
         {
             ViewId = appearance.ViewId, LayerId = appearance.Layer, PlacementId = appearance.PlacementId, Locked = appearance.Locked
         };
-        var result = new ScenePrimitive[2 + (appearance.FreeStart ? 1 : 0) + (appearance.FreeEnd ? 1 : 0)];
-        result[0] = Tag(new ScenePath(id, appearance.Twisted ? "twisted-wire" : "wire", sheetPoints, appearance.Color, .45 * appearance.Scale));
-        var label = $"{appearance.Name}  {appearance.ColorCode}  {appearance.CrossSection.ToString("0.######", CultureInfo.InvariantCulture)} mm²";
-        result[1] = Tag(new SceneText(id, "wire-label", label, sheetPoints[Math.Min(1, sheetPoints.Length - 1)] + new Point2(1, -2 * appearance.Scale), 2.2 * appearance.Scale));
-        var next = 2;
-        if (appearance.FreeStart) result[next++] = Tag(new SceneEllipse(id, "free-end", sheetPoints[0], .7 * appearance.Scale, .7 * appearance.Scale, appearance.Color, .25));
-        if (appearance.FreeEnd) result[next] = Tag(new SceneEllipse(id, "free-end", sheetPoints[^1], .7 * appearance.Scale, .7 * appearance.Scale, appearance.Color, .25));
-        cache[id] = new(points, appearance, result);
-        return result;
+        var reusablePath = previous is not null &&
+            previous.Appearance with { LabelPosition = appearance.LabelPosition, LabelAnchor = appearance.LabelAnchor } == appearance &&
+            (ReferenceEquals(previous.Source, points) || previous.Source.SequenceEqual(points))
+            ? previous.Primitives.FirstOrDefault(p => p is ScenePath && p.Category is "wire" or "twisted-wire") : null;
+        var result = new List<ScenePrimitive>(5)
+        {
+            reusablePath ?? Tag(new ScenePath(id, appearance.Twisted ? "twisted-wire" : "wire", sheetPoints, appearance.Color, appearance.LineWidth * appearance.Scale))
+        };
+        if (appearance.ShowLabel)
+        {
+            var label = WireLabel(appearance.Name, appearance.ColorCode, appearance.CrossSection);
+            result.Add(Tag(new SceneText(id, "wire-label", label, appearance.LabelPosition,
+                appearance.LabelFontSize * appearance.Scale)));
+            if (appearance.LabelPosition.DistanceTo(appearance.LabelAnchor) > appearance.LabelFontSize * appearance.Scale * 2.2)
+                result.Add(Tag(new ScenePath(id, "wire-label-leader",
+                    [appearance.LabelAnchor, appearance.LabelPosition + new Point2(0, .5 * appearance.Scale)],
+                    Muted, .15 * appearance.Scale)));
+        }
+        if (appearance.FreeStart) result.Add(Tag(new SceneEllipse(id, "free-end", sheetPoints[0], .7 * appearance.Scale, .7 * appearance.Scale, appearance.Color, .25)));
+        if (appearance.FreeEnd) result.Add(Tag(new SceneEllipse(id, "free-end", sheetPoints[^1], .7 * appearance.Scale, .7 * appearance.Scale, appearance.Color, .25)));
+        var primitives = result.ToArray();
+        cache[id] = new(points, appearance, primitives);
+        return primitives;
     }
+
+    private static string WireLabel(string name, string color, double section) =>
+        $"{name}  {color}  {section.ToString("0.######", CultureInfo.InvariantCulture)} mm²";
 }

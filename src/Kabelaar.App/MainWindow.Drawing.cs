@@ -10,6 +10,9 @@ public partial class MainWindow
 {
     private Endpoint _wireStart = new();
     private Annotation? _pendingImage;
+    private DrawingScene? _endpointSnapScene;
+    private DrawingView? _endpointSnapView;
+    private SceneSpatialIndex? _endpointSnapIndex;
     private void Tool_Click(object sender, RoutedEventArgs e)
     {
         var tag = (sender as FrameworkElement)?.Tag?.ToString();
@@ -35,19 +38,50 @@ public partial class MainWindow
     }
     private Point2 SnapToEndpoint(Point2 sheetPoint)
     {
+        EnsureEndpointSnapIndex();
         var closest = sheetPoint; var distance = 3.0;
-        foreach (var pin in Canvas.Scene?.Index.Query(new(sheetPoint.X - distance, sheetPoint.Y - distance, distance * 2, distance * 2))
-            .OfType<SceneEllipse>().Where(p => p.ViewId == _view.Id && p.Category is "pin" or "splice") ?? [])
+        foreach (var pin in _endpointSnapIndex?.Query(new(sheetPoint.X - distance, sheetPoint.Y - distance, distance * 2, distance * 2))
+            .OfType<SceneEllipse>() ?? [])
         {
             var d = pin.Center.DistanceTo(sheetPoint);
             if (d < distance) { closest = pin.Center; distance = d; }
         }
         return closest;
     }
+    private void EnsureEndpointSnapIndex()
+    {
+        var scene = Canvas.Scene;
+        if (ReferenceEquals(scene, _endpointSnapScene) && ReferenceEquals(_view, _endpointSnapView)) return;
+        var endpoints = new List<ScenePrimitive>();
+        var layers = _sheet.Layers.ToDictionary(l => l.Id);
+        var connectors = _project.Assembly.Connectors.ToDictionary(c => c.Id);
+        var splices = _project.Assembly.Splices.Select(s => s.Id).ToHashSet();
+        var pinsByPart = _project.Parts.ToDictionary(p => p.Id, p => p.Pins.ToDictionary(pin => pin.Id));
+        foreach (var placement in _view.Components)
+        {
+            if (layers.TryGetValue(placement.LayerId, out var layer) && !layer.Visible) continue;
+            if (connectors.TryGetValue(placement.EntityId, out var connector) &&
+                pinsByPart.TryGetValue(connector.PartId, out var pins))
+            {
+                foreach (var cavity in connector.Cavities)
+                    if (pins.TryGetValue(cavity.PinDefinitionId, out var pin))
+                        endpoints.Add(new SceneEllipse(cavity.Id, "snap-pin",
+                            ToSheet(Geometry.ComponentWorld(placement, pin.Position)), 0, 0));
+            }
+            else if (splices.Contains(placement.EntityId))
+                endpoints.Add(new SceneEllipse(placement.EntityId, "snap-splice", ToSheet(placement.Position), 0, 0));
+        }
+        // This index is interaction metadata, independent from visible/exported pin dots.
+        // A new scene follows every model/style/placement change; pointer movement only queries it.
+        _endpointSnapIndex = new SceneSpatialIndex(endpoints);
+        _endpointSnapScene = scene;
+        _endpointSnapView = _view;
+    }
     private Endpoint FindEndpoint(Point2 modelPoint)
     {
         foreach (var placed in _view.Components)
         {
+            if (_sheet.Layers.Find(l => l.Id == placed.LayerId)?.Visible == false) continue;
             var connector = _project.Assembly.Connectors.Find(c => c.Id == placed.EntityId);
             if (connector is not null)
                 foreach (var cavity in connector.Cavities)

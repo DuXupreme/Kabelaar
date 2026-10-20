@@ -51,7 +51,7 @@ public sealed class PersistenceTests : IDisposable
             using (var reader = new StreamReader(entry.Open())) json = reader.ReadToEnd();
             entry.Delete();
             using var writer = new StreamWriter(zip.CreateEntry("project.json").Open());
-            writer.Write(json.Replace("\"schemaVersion\": 1", "\"schemaVersion\": 999"));
+            writer.Write(json.Replace($"\"schemaVersion\": {HarnessProject.CurrentSchemaVersion}", "\"schemaVersion\": 999"));
         }
         await Assert.ThrowsAsync<ProjectFormatException>(() => store.LoadAsync(PathFor()));
         using (var zip = ZipFile.Open(PathFor(), ZipArchiveMode.Update)) zip.CreateEntry("project.json");

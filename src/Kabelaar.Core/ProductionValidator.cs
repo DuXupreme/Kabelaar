@@ -197,8 +197,14 @@ public static class ProductionValidator
             foreach (var view in sheet.Views)
             {
                 if (view.Scale <= 0) Error("view.scale", view.Id, "Aanzichtschaal moet positief zijn.", true);
+                if (!PresentationLimits.ValidStyle(view.Style))
+                    Error("view.style", view.Id, "De tekenstijl bevat een ongeldige lijndikte, letterhoogte of twistweergave.", true);
                 foreach (var placement in view.Components)
                 {
+                    if (!PresentationLimits.ValidDisplayScale(placement.DisplayScale) || !PresentationLimits.ValidFontSize(placement.LabelFontSizeMm))
+                        Error("placement.style", placement.Id, "Symboolschaal en letterhoogte moeten groter dan 0 en maximaal 1000 zijn.", true);
+                    if (view.Mode == LayoutMode.Scaled && Math.Abs(placement.DisplayScale - 1) > 1e-9)
+                        Error("placement.scaledSymbol", placement.Id, "Een aanzicht op schaal vereist werkelijke onderdeelgeometrie met symboolschaal 1.", true);
                     if (!connectors.ContainsKey(placement.EntityId) && !spliceIds.Contains(placement.EntityId))
                         Error("placement.entity", placement.Id, "Aanzicht verwijst naar een onbekend onderdeel.", true);
                     if (!layerIds.Contains(placement.LayerId)) Error("placement.layer", placement.Id, "Onderdeel staat op een onbekende laag.", true);
@@ -221,7 +227,7 @@ public static class ProductionValidator
                         if (connectors.TryGetValue(placement.EntityId, out var connector))
                             foreach (var cavity in connector.Cavities)
                                 if (pins.TryGetValue(cavity.PinDefinitionId, out var pin))
-                                    positions[(connector.Id, cavity.Id)] = Geometry.Transform(pin.Position, placement.RotationDegrees, placement.Position);
+                                    positions[(connector.Id, cavity.Id)] = Geometry.ComponentWorld(placement, pin.Position);
                         if (spliceIds.Contains(placement.EntityId)) positions[(placement.EntityId, null)] = placement.Position;
                     }
                     foreach (var wire in assembly.Conductors.Where(w => w.BranchIds.Count > 0 && w.BranchIds.All(routeMap.ContainsKey)))
@@ -260,6 +266,9 @@ public static class ProductionValidator
                     if (annotation.AssetId is { } asset && !assetIds.Contains(asset)) Error("annotation.asset", annotation.Id, "Afbeelding verwijst naar een onbekende bijlage.", true);
                     if (annotation.EntityId is { } entity && !branches.ContainsKey(entity) && !wireIds.Contains(entity) && !connectors.ContainsKey(entity) && !spliceIds.Contains(entity))
                         Error("annotation.entity", annotation.Id, "Aantekening verwijst naar een onbekend object.", true);
+                    if (annotation.Kind is AnnotationKind.WireTable or AnnotationKind.PinTable &&
+                        annotation.EntityId is { } filter && !connectors.ContainsKey(filter))
+                        Error("annotation.connectorFilter", annotation.Id, "Het aansluitingenfilter van deze tabel moet naar een connector verwijzen.", true);
                     if (annotation.DimensionOverrideMm.HasValue) Warn("dimension.override", annotation.Id, "Deze maattekst is handmatig ingevuld en wordt niet uit de productiemaat afgeleid.");
                 }
             }
@@ -356,6 +365,7 @@ public static class ProductionValidator
                 case PlacedComponent component:
                     Identity(component.Id, owner); Required(component.EntityId, component.Id); Required(component.LayerId, component.Id);
                     Number(component.RotationDegrees, component.Id);
+                    Number(component.DisplayScale, component.Id); Number(component.LabelFontSizeMm, component.Id);
                     if (!Geometry.IsFinite(component.Position) || !Geometry.IsFinite(component.LabelOffset))
                         issues.Add(new(Severity.Error, "data.nonfinite", component.Id, "Een coördinaat is niet eindig.", true));
                     return;

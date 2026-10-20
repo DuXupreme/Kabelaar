@@ -38,6 +38,7 @@ public partial class MainWindow
             Check(_history.StateToken == pendingState, "Een oude propertyknop voert tijdens uitgestelde verversing geen bewerking uit");
             _history.Undo();
             await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
+            await CheckPresentationEditingAsync(Check);
             var wire = _project.Assembly.Conductors[0];
             Canvas.Select(wire.Id);
             Check(WireGrid.SelectedItem is WireDisplay row && row.Id == wire.Id, "Tekeningselectie koppelt naar aansluitlijst");

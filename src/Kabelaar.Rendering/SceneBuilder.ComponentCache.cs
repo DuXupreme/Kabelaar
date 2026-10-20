@@ -48,7 +48,9 @@ public static partial class SceneBuilder
     }
 
     private readonly record struct ComponentAppearance(string ViewId, Point2 Origin, double Scale, string PlacementId,
-        string EntityId, string Layer, bool Locked, Point2 Position, double Rotation, Point2 LabelOffset);
+        string EntityId, string Layer, bool Locked, Point2 Position, double Rotation, Point2 LabelOffset,
+        double DisplayScale, bool ShowPins, bool ShowPinNumbers, bool ShowLabel, bool ShowPartNumber,
+        double LabelFontSize, double LineWidth);
     private sealed record ComponentProjection(ComponentAppearance Appearance, PartVisual? Part, bool IsConnector,
         string Name, CavityVisual[] Cavities, ScenePrimitive[] Primitives,
         ((string Entity, string? Cavity) Key, Point2 Position)[] Endpoints);
@@ -80,7 +82,11 @@ public static partial class SceneBuilder
             var primitives = new List<ScenePrimitive>();
             var endpoints = new List<((string Entity, string? Cavity) Key, Point2 Position)>(count);
             var (sin, cos) = Math.SinCos(appearance.Rotation * Math.PI / 180);
-            Point2 World(Point2 p) => new(p.X * cos - p.Y * sin + appearance.Position.X, p.X * sin + p.Y * cos + appearance.Position.Y);
+            Point2 World(Point2 p)
+            {
+                p *= appearance.DisplayScale;
+                return new(p.X * cos - p.Y * sin + appearance.Position.X, p.X * sin + p.Y * cos + appearance.Position.Y);
+            }
             Point2 SheetPoint(Point2 p) => appearance.Origin + p * appearance.Scale;
             Point2 ComponentPoint(Point2 p) => SheetPoint(World(p));
             void Add(ScenePrimitive primitive) => primitives.Add(primitive with
@@ -95,40 +101,49 @@ public static partial class SceneBuilder
                 if (part is not null && part.Symbol.Length > 0)
                     foreach (var path in part.Symbol)
                         Add(new ScenePath(id, "connector-symbol", path.Flattened.Select(ComponentPoint).ToArray(),
-                            Ink, .3 * scale, Closed: path.Closed, Dashed: path.Hidden));
+                            path.Hidden ? Muted : Ink, appearance.LineWidth * scale, Closed: path.Closed, Dashed: path.Hidden));
                 else
                 {
                     var w = part?.Width ?? 20; var h = part?.Height ?? 12;
                     Add(new ScenePath(id, "connector-symbol",
                         new[] { new Point2(-w / 2, -h / 2), new Point2(w / 2, -h / 2), new Point2(w / 2, h / 2), new Point2(-w / 2, h / 2) }.Select(ComponentPoint).ToArray(),
-                        Ink, .3 * scale, "#FFFFFF", true));
+                        Ink, appearance.LineWidth * scale, "#FFFFFF", true));
                 }
                 if (part is not null)
                 {
                     foreach (var label in part.Labels)
                         Add(new SceneText(id, "symbol-label", label.Text, ComponentPoint(label.Position),
-                            label.Height * scale, RotationDegrees: appearance.Rotation));
+                            label.Height * scale * appearance.DisplayScale, RotationDegrees: appearance.Rotation));
                     var cavityByPin = FirstById(snapshot, c => c.PinId);
                     foreach (var pin in part.Pins)
                     {
                         var found = cavityByPin.TryGetValue(pin.Id, out var cavity);
                         var point = ComponentPoint(pin.Position);
                         var fill = found ? cavity.State switch { CavityState.Occupied => "#137F8B", CavityState.Plugged => "#6C7A86", _ => "#FFFFFF" } : "#FFFFFF";
-                        Add(new SceneEllipse(id, "pin", point, .7 * scale, .7 * scale, Ink, .2 * scale, fill));
-                        Add(new SceneText(id, "pin-label", found ? cavity.Label : pin.Label, point + new Point2(1.2 * scale, -.7 * scale), 2 * scale));
+                        if (appearance.ShowPins)
+                            Add(new SceneEllipse(id, "pin", point, .7 * scale, .7 * scale, Ink, .2 * scale, fill));
+                        if (appearance.ShowPinNumbers)
+                            Add(new SceneText(id, "pin-label", found ? cavity.Label : pin.Label, point + new Point2(1.2 * scale, -.7 * scale), 2 * scale));
                     }
                     foreach (var cavity in snapshot)
                         if (part.PinsById.TryGetValue(cavity.PinId, out var pin))
                             endpoints.Add(((id, cavity.Id), World(pin.Position)));
                 }
-                Add(new SceneText(id, "connector-label", name, position + appearance.LabelOffset * scale, 3 * scale, Bold: true));
-                Add(new SceneText(id, "part-number", part?.PartNumber ?? "Onderdeel ontbreekt",
-                    position + appearance.LabelOffset * scale + new Point2(0, 3.5 * scale), 2.3 * scale, Muted));
+                if (appearance.ShowLabel)
+                    Add(new SceneText(id, "connector-label", name, position + appearance.LabelOffset * scale,
+                        appearance.LabelFontSize * scale, Bold: true));
+                if (appearance.ShowPartNumber)
+                    Add(new SceneText(id, "part-number", part?.PartNumber ?? "Onderdeel ontbreekt",
+                        position + appearance.LabelOffset * scale + new Point2(0, appearance.LabelFontSize * 1.2 * scale),
+                        appearance.LabelFontSize * .77 * scale, Muted));
             }
             else
             {
-                Add(new SceneEllipse(id, "splice", position, 1.3 * scale, 1.3 * scale, Ink, .25, Ink));
-                Add(new SceneText(id, "splice-label", name, position + appearance.LabelOffset * scale, 2.5 * scale, Bold: true));
+                var radius = 1.3 * scale * appearance.DisplayScale;
+                Add(new SceneEllipse(id, "splice", position, radius, radius, Ink, appearance.LineWidth * scale, Ink));
+                if (appearance.ShowLabel)
+                    Add(new SceneText(id, "splice-label", name, position + appearance.LabelOffset * scale,
+                        appearance.LabelFontSize * scale, Bold: true));
                 endpoints.Add(((id, null), appearance.Position));
             }
             return memo.Value = new(appearance, part, connector is not null, name, snapshot, primitives.ToArray(), endpoints.ToArray());

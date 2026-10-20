@@ -34,18 +34,20 @@ public partial class MainWindow
         var connector = _project.Assembly.Connectors.Find(c => c.Id == id || c.Cavities.Any(p => p.Id == id));
         var placement = _view.Components.Find(p => p.Id == id || p.EntityId == id || p.EntityId == connector?.Id);
         connector ??= _project.Assembly.Connectors.Find(c => c.Id == placement?.EntityId);
-        var connectorState = connector is not null && Canvas.Selection.Count == 1 ? ConnectorPropertiesState(connector, placement) : null;
-        if (connectorState is not null && _propertiesState?.SequenceEqual(connectorState) == true)
+        var splice = _project.Assembly.Splices.Find(s => s.Id == id || s.Id == placement?.EntityId);
+        var selectionState = Canvas.Selection.Count != 1 ? null
+            : connector is not null ? ConnectorPropertiesState(connector, placement)
+            : splice is not null ? SplicePropertiesState(splice, placement) : null;
+        if (selectionState is not null && _propertiesState?.SequenceEqual(selectionState) == true)
         {
             _refreshPlacementProperties?.Invoke();
             return;
         }
-        _propertiesState = connectorState; _refreshPlacementProperties = null;
+        _propertiesState = selectionState; _refreshPlacementProperties = null;
         PropertiesPanel.Children.Clear();
         var form = new PropertyForm { CanApply = () => !_propertiesRefreshQueued };
         PropertiesPanel.Children.Add(form.Panel);
         var wire = _project.Assembly.Conductors.Find(w => w.Id == id);
-        var splice = _project.Assembly.Splices.Find(s => s.Id == id || s.Id == placement?.EntityId);
         var annotation = _view.Annotations.Find(a => a.Id == id);
         var route = SelectedRoute();
 
@@ -134,6 +136,19 @@ public partial class MainWindow
         return state;
     }
 
+    private IReadOnlyList<object?> SplicePropertiesState(Splice splice, PlacedComponent? placement)
+    {
+        var state = new List<object?>
+        {
+            "splice", _project, _sheet, _view, SelectedId, splice, splice.Name, splice.PartId,
+            splice.Notes, placement, placement?.LayerId
+        };
+        foreach (var layer in _sheet.Layers) state.AddRange([layer, layer.Name, layer.Locked]);
+        foreach (var part in _project.Parts.Where(p => p.Kind == PartKind.Splice))
+            state.AddRange([part, part.PartNumber, part.Name]);
+        return state;
+    }
+
     private void BuildProjectProperties(PropertyForm form)
     {
         var title = form.Text("Projecttitel", _project.Title);
@@ -152,6 +167,7 @@ public partial class MainWindow
         }, true);
         form.Heading("Actief aanzicht");
         form.Note($"{_sheet.Name} · {_view.Name}\n{(_view.Mode == LayoutMode.Scaled ? "Geometrie bepaalt de routelengte." : "Vrije opmaak bewaart de productiematen.")}");
+        form.Action("Tekenstijl…", OpenDrawingStyle);
         form.Note($"{_project.Assembly.Connectors.Count} connectoren · {_project.Assembly.Conductors.Count} aders · {_project.Sheets.Count} bladen");
         if (SelectedPart is { } part)
         {
@@ -170,6 +186,7 @@ public partial class MainWindow
         var notes = form.Text("Montagenotities", connector.Notes, true);
         TextBox? x = null, y = null, angle = null, labelX = null, labelY = null;
         ComboBox? layer = null;
+        ComponentPresentationFields? presentation = null;
         if (placement is not null)
         {
             form.Heading("Plaatsing in dit aanzicht");
@@ -178,6 +195,7 @@ public partial class MainWindow
             labelX = form.Number("Labelverschuiving X (mm)", placement.LabelOffset.X);
             labelY = form.Number("Labelverschuiving Y (mm)", placement.LabelOffset.Y);
             layer = LayerChoice(form, placement.LayerId);
+            presentation = BuildComponentPresentation(form, placement, connector: true);
             var knownPosition = placement.Position;
             var knownRotation = placement.RotationDegrees;
             var knownOffset = placement.LabelOffset;
@@ -190,6 +208,7 @@ public partial class MainWindow
                 if (placement.LabelOffset.X != knownOffset.X) labelX.Text = EditData.Format(placement.LabelOffset.X);
                 if (placement.LabelOffset.Y != knownOffset.Y) labelY.Text = EditData.Format(placement.LabelOffset.Y);
                 knownPosition = placement.Position; knownRotation = placement.RotationDegrees; knownOffset = placement.LabelOffset;
+                presentation.Refresh();
             };
         }
         form.Action("Connector toepassen", () =>
@@ -199,7 +218,7 @@ public partial class MainWindow
             var commands = new List<IEditCommand>();
             if (placement is not null)
             {
-                commands.Add(HarnessOperations.MoveComponent(_project, _view, placement,
+                commands.Add(presentation!.Command(_project, _view, placement,
                     new(EditData.Number(x!.Text, "X"), EditData.Number(y!.Text, "Y")), EditData.Number(angle!.Text, "Rotatie")));
                 var beforeOffset = placement.LabelOffset; var beforeLayer = placement.LayerId;
                 var offset = new Point2(EditData.Number(labelX!.Text, "Label X"), EditData.Number(labelY!.Text, "Label Y"));
@@ -333,12 +352,27 @@ public partial class MainWindow
         var name = form.Text("Splicenaam", splice.Name);
         var part = PartChoice(form, "Spliceartikel", splice.PartId, PartKind.Splice);
         var notes = form.Text("Montagenotities", splice.Notes, true);
-        TextBox? x = null, y = null;
+        TextBox? x = null, y = null, labelX = null, labelY = null;
         ComboBox? layer = null;
+        ComponentPresentationFields? presentation = null;
         if (placement is not null)
         {
             x = form.Number("X (mm)", placement.Position.X); y = form.Number("Y (mm)", placement.Position.Y);
+            labelX = form.Number("Labelverschuiving X (mm)", placement.LabelOffset.X);
+            labelY = form.Number("Labelverschuiving Y (mm)", placement.LabelOffset.Y);
             layer = LayerChoice(form, placement.LayerId);
+            presentation = BuildComponentPresentation(form, placement, connector: false);
+            var knownPosition = placement.Position;
+            var knownOffset = placement.LabelOffset;
+            _refreshPlacementProperties = () =>
+            {
+                if (placement.Position.X != knownPosition.X) x.Text = EditData.Format(placement.Position.X);
+                if (placement.Position.Y != knownPosition.Y) y.Text = EditData.Format(placement.Position.Y);
+                if (placement.LabelOffset.X != knownOffset.X) labelX.Text = EditData.Format(placement.LabelOffset.X);
+                if (placement.LabelOffset.Y != knownOffset.Y) labelY.Text = EditData.Format(placement.LabelOffset.Y);
+                knownPosition = placement.Position; knownOffset = placement.LabelOffset;
+                presentation.Refresh();
+            };
         }
         form.Action("Splice toepassen", () =>
         {
@@ -347,9 +381,13 @@ public partial class MainWindow
             var commands = new List<IEditCommand>();
             if (placement is not null)
             {
-                commands.Add(HarnessOperations.MoveComponent(_project, _view, placement, new(EditData.Number(x!.Text, "X"), EditData.Number(y!.Text, "Y"))));
+                commands.Add(presentation!.Command(_project, _view, placement, new(EditData.Number(x!.Text, "X"), EditData.Number(y!.Text, "Y")), placement.RotationDegrees));
                 var previousLayer = placement.LayerId; var nextLayer = PropertyForm.Value<DrawingLayer>(layer!).Id;
-                commands.Add(new DelegateCommand("Splicelaag", () => placement.LayerId = nextLayer, () => placement.LayerId = previousLayer));
+                var previousOffset = placement.LabelOffset;
+                var nextOffset = new Point2(EditData.Number(labelX!.Text, "Label X"), EditData.Number(labelY!.Text, "Label Y"));
+                commands.Add(new DelegateCommand("Spliceweergave",
+                    () => { placement.LayerId = nextLayer; placement.LabelOffset = nextOffset; },
+                    () => { placement.LayerId = previousLayer; placement.LabelOffset = previousOffset; }));
             }
             commands.Add(PropertyReplace(_project.Assembly.Splices, splice, next, "Splicegegevens"));
             Execute(new CompositeCommand("Splice wijzigen", commands.ToArray()));
@@ -400,7 +438,7 @@ public partial class MainWindow
         var layer = LayerChoice(form, annotation.LayerId);
         var locked = form.Check("Positie vergrendelen", annotation.Locked);
         TextBox? width = null, height = null, offset = null, tolerance = null, manualDimension = null;
-        ComboBox? dimensionDirection = null, dimensionBranch = null;
+        ComboBox? dimensionDirection = null, dimensionBranch = null, tableConnector = null;
         var columnChecks = new List<(string Key, CheckBox Box)>();
         var isTable = annotation.Kind is AnnotationKind.WireTable or AnnotationKind.PinTable or AnnotationKind.BomTable or AnnotationKind.RevisionTable;
         if (isTable || annotation.Kind == AnnotationKind.Image)
@@ -421,6 +459,15 @@ public partial class MainWindow
         }
         if (isTable)
         {
+            if (annotation.Kind is AnnotationKind.WireTable or AnnotationKind.PinTable)
+            {
+                var connectors = new[] { new PropertyOption(null, "Alle connectoren") }.Concat(
+                    _project.Assembly.Connectors.OrderBy(c => c.Name).Select(c => new PropertyOption(c.Id, c.Name))).ToArray();
+                tableConnector = form.Choice("Aansluitingen van", connectors, connectors.FirstOrDefault(c => c.Id == annotation.EntityId), c => c.Label);
+                form.Note(annotation.Kind == AnnotationKind.WireTable
+                    ? "Een connectorfilter toont alleen de aders die op die connector zijn aangesloten."
+                    : "Een connectorfilter toont alleen de pinnen van die connector.");
+            }
             form.Heading("Tabelkolommen");
             var (defaults, rows) = SceneBuilder.TableData(_project, annotation.Kind);
             var available = rows.FirstOrDefault()?.Keys.ToArray() ?? TableColumnsFor(annotation.Kind);
@@ -453,6 +500,7 @@ public partial class MainWindow
             }
             if (isTable)
             {
+                if (tableConnector is not null) next.EntityId = PropertyForm.Value<PropertyOption>(tableConnector).Id;
                 next.Columns = columnChecks.Where(c => c.Box.IsChecked == true).Select(c => c.Key).ToList();
                 if (next.Columns.Count == 0) throw new ArgumentException("Kies minstens één tabelkolom.");
             }

@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Kabelaar.Core;
@@ -68,7 +69,7 @@ public sealed class ProjectStore
             var manifest = await ReadJsonAsync<Manifest>(zip, "manifest.json", cancellationToken);
             if (manifest.Format != "Kabelaar.Project" || manifest.Version != 1)
                 throw new ProjectFormatException("Dit projectformaat is onbekend of vereist een nieuwere Kabelaar-versie.");
-            var project = await ReadJsonAsync<HarnessProject>(zip, manifest.ProjectEntry, cancellationToken);
+            var project = await ReadProjectAsync(zip, manifest.ProjectEntry, cancellationToken);
             if (project.SchemaVersion != HarnessProject.CurrentSchemaVersion)
                 throw new ProjectFormatException("Deze projectschemaversie wordt niet ondersteund. Het origineel is niet gewijzigd.");
             if (project.Assets.Count != 0)
@@ -163,6 +164,58 @@ public sealed class ProjectStore
         await using var stream = entry.Open();
         return await JsonSerializer.DeserializeAsync<T>(stream, LoadOptions, token)
             ?? throw new ProjectFormatException($"Leeg projectbestand: {name}");
+    }
+    private static async Task<HarnessProject> ReadProjectAsync(ZipArchive zip, string name, CancellationToken token)
+    {
+        var entry = zip.GetEntry(name) ?? throw new ProjectFormatException($"Projectbestand ontbreekt: {name}");
+        if (entry.Length > 64 * 1024 * 1024) throw new ProjectFormatException("Projectmetadata is te groot.");
+        await using var stream = entry.Open();
+        using var document = await JsonDocument.ParseAsync(stream, cancellationToken: token);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object ||
+            !root.TryGetProperty("schemaVersion", out var schema) ||
+            schema.ValueKind != JsonValueKind.Number || !schema.TryGetInt32(out var version))
+            throw new ProjectFormatException("De projectschemaversie ontbreekt of is ongeldig.");
+        if (version is < 1 or > HarnessProject.CurrentSchemaVersion)
+            throw new ProjectFormatException("Deze projectschemaversie wordt niet ondersteund. Het origineel is niet gewijzigd.");
+        if (version == HarnessProject.CurrentSchemaVersion)
+            return root.Deserialize<HarnessProject>(LoadOptions) ?? throw new ProjectFormatException("Het projectbestand is leeg.");
+
+        // Schema 1 had no presentation controls. Add exactly these newly introduced
+        // fields, retaining its original appearance. Every pre-existing field remains
+        // mandatory, and explicit null or malformed values are never repaired.
+        var upgraded = JsonNode.Parse(root.GetRawText())!.AsObject();
+        var spliceIds = new HashSet<string>(StringComparer.Ordinal);
+        if (upgraded["assembly"] is JsonObject assembly && assembly["splices"] is JsonArray splices)
+            foreach (var splice in splices.OfType<JsonObject>())
+                if (splice["id"] is JsonValue idValue && idValue.TryGetValue<string>(out var id) && id is not null)
+                    spliceIds.Add(id);
+        if (upgraded["sheets"] is JsonArray sheets)
+            foreach (var sheet in sheets.OfType<JsonObject>())
+                if (sheet["views"] is JsonArray views)
+                    foreach (var view in views.OfType<JsonObject>())
+                    {
+                        if (!view.ContainsKey("style"))
+                            view["style"] = JsonSerializer.SerializeToNode(new DrawingStyle(), JsonOptions);
+                        if (view["components"] is not JsonArray components) continue;
+                        foreach (var component in components.OfType<JsonObject>())
+                        {
+                            Add("displayScale", 1d);
+                            Add("showPins", true);
+                            Add("showPinNumbers", true);
+                            Add("showLabel", true);
+                            Add("showPartNumber", true);
+                            var isSplice = component["entityId"] is JsonValue entityValue &&
+                                entityValue.TryGetValue<string>(out var entityId) && entityId is not null && spliceIds.Contains(entityId);
+                            Add("labelFontSizeMm", isSplice ? 2.5 : 3d);
+                            void Add<T>(string key, T value)
+                            {
+                                if (!component.ContainsKey(key)) component[key] = JsonSerializer.SerializeToNode(value, JsonOptions);
+                            }
+                        }
+                    }
+        upgraded["schemaVersion"] = HarnessProject.CurrentSchemaVersion;
+        return upgraded.Deserialize<HarnessProject>(LoadOptions) ?? throw new ProjectFormatException("Het projectbestand is leeg.");
     }
     private static async Task WriteJsonAsync<T>(ZipArchive zip, string name, T value, CancellationToken token)
     {

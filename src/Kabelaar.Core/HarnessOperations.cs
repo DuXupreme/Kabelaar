@@ -94,22 +94,59 @@ public static class HarnessOperations
     {
         if (!Geometry.IsFinite(position) || !double.IsFinite(rotationDegrees ?? placement.RotationDegrees))
             throw new ArgumentException("Positie en hoek moeten eindig zijn.");
-        return MovePlacements(project, view, new Dictionary<PlacedComponent, (Point2, double)> { [placement] = (position, rotationDegrees ?? placement.RotationDegrees) }, previousPinPositions);
+        return MovePlacements(project, view, new Dictionary<PlacedComponent, (Point2, double, double)> { [placement] = (position, rotationDegrees ?? placement.RotationDegrees, placement.DisplayScale) }, previousPinPositions);
     }
 
     public static IEditCommand MoveSelection(HarnessProject project, DrawingView view, IReadOnlyDictionary<string, Point2> positions)
     {
-        var placements = new Dictionary<PlacedComponent, (Point2, double)>();
+        var placements = new Dictionary<PlacedComponent, (Point2, double, double)>();
         foreach (var (id, position) in positions)
         {
             if (!Geometry.IsFinite(position)) throw new ArgumentException("Posities moeten eindig zijn.");
             var placement = view.Components.Single(p => p.Id == id);
-            placements[placement] = (position, placement.RotationDegrees);
+            placements[placement] = (position, placement.RotationDegrees, placement.DisplayScale);
         }
         return MovePlacements(project, view, placements);
     }
 
-    private static IEditCommand MovePlacements(HarnessProject project, DrawingView view, Dictionary<PlacedComponent, (Point2 Position, double Rotation)> placements,
+    public static IEditCommand SetComponentPresentation(HarnessProject project, DrawingView view, PlacedComponent placement,
+        double displayScale, bool showPins, bool showPinNumbers, bool showLabel, bool showPartNumber, double labelFontSizeMm,
+        Point2? targetPosition = null, double? targetRotation = null)
+    {
+        if (!PresentationLimits.ValidDisplayScale(displayScale) || !PresentationLimits.ValidFontSize(labelFontSizeMm))
+            throw new ArgumentOutOfRangeException(nameof(displayScale), "Symboolschaal en letterhoogte moeten groter dan 0 en maximaal 1000 zijn.");
+        if (view.Mode == LayoutMode.Scaled && Math.Abs(displayScale - 1) > 1e-9)
+            throw new InvalidOperationException("Een afzonderlijke symboolschaal kan alleen in vrije opmaak. Een aanzicht op schaal gebruikt de werkelijke onderdeelgeometrie.");
+        var position = targetPosition ?? placement.Position;
+        var rotation = targetRotation ?? placement.RotationDegrees;
+        if (!Geometry.IsFinite(position) || !double.IsFinite(rotation))
+            throw new ArgumentException("Positie en hoek moeten eindig zijn.");
+        var geometry = position == placement.Position && rotation == placement.RotationDegrees && displayScale == placement.DisplayScale
+            ? new CompositeCommand("Geometrie behouden")
+            : MovePlacements(project, view,
+                new Dictionary<PlacedComponent, (Point2, double, double)> { [placement] = (position, rotation, displayScale) });
+        var before = (placement.ShowPins, placement.ShowPinNumbers, placement.ShowLabel, placement.ShowPartNumber, placement.LabelFontSizeMm);
+        return new CompositeCommand("Onderdeelweergave wijzigen",
+        [
+            geometry,
+            new DelegateCommand("Onderdeellabels wijzigen",
+                () => (placement.ShowPins, placement.ShowPinNumbers, placement.ShowLabel, placement.ShowPartNumber, placement.LabelFontSizeMm) =
+                    (showPins, showPinNumbers, showLabel, showPartNumber, labelFontSizeMm),
+                () => (placement.ShowPins, placement.ShowPinNumbers, placement.ShowLabel, placement.ShowPartNumber, placement.LabelFontSizeMm) = before)
+        ]);
+    }
+
+    public static IEditCommand SetDrawingStyle(DrawingView view, DrawingStyle style)
+    {
+        ArgumentNullException.ThrowIfNull(style);
+        if (!PresentationLimits.ValidStyle(style))
+            throw new ArgumentException("Lijndiktes en teksthoogte moeten groter dan 0 en maximaal 1000 mm zijn. Twistuitwijking moet 0–1000 mm zijn; getekende spoed 0–100000 mm.", nameof(style));
+        var before = view.Style.Copy();
+        var after = style.Copy();
+        return new DelegateCommand("Tekeningstijl wijzigen", () => view.Style = after.Copy(), () => view.Style = before.Copy());
+    }
+
+    private static IEditCommand MovePlacements(HarnessProject project, DrawingView view, Dictionary<PlacedComponent, (Point2 Position, double Rotation, double Scale)> placements,
         IReadOnlyDictionary<string, Point2>? previousPinPositions = null)
     {
         var changes = new Dictionary<PlacedRoute, List<Point2>>();
@@ -121,7 +158,7 @@ public static class HarnessOperations
                 var placement = placements.Keys.FirstOrDefault(p => p.EntityId == endpoint.EntityId);
                 if (placement is null || endpoint.Kind == EndpointKind.Free || wire.BranchIds.Count == 0) continue;
                 var target = placements[placement];
-                var simulated = new PlacedComponent { EntityId = placement.EntityId, Position = target.Position, RotationDegrees = target.Rotation };
+                var simulated = new PlacedComponent { EntityId = placement.EntityId, Position = target.Position, RotationDegrees = target.Rotation, DisplayScale = target.Scale };
                 var branchId = first ? wire.BranchIds[0] : wire.BranchIds[^1];
                 if (view.Mode == LayoutMode.Free && wiresByBranch[branchId].Take(2).Count() > 1) continue;
                 var oldPin = endpoint.CavityId is { } cavityId && previousPinPositions?.TryGetValue(cavityId, out var previousPin) == true
@@ -151,7 +188,7 @@ public static class HarnessOperations
                         if (anchor is null) continue;
                         var oldPoint = Geometry.PinWorld(project, anchor, endpoint.CavityId);
                         var target = placements.TryGetValue(anchor, out var moved)
-                            ? new PlacedComponent { EntityId = anchor.EntityId, Position = moved.Position, RotationDegrees = moved.Rotation } : anchor;
+                            ? new PlacedComponent { EntityId = anchor.EntityId, Position = moved.Position, RotationDegrees = moved.Rotation, DisplayScale = moved.Scale } : anchor;
                         var expected = Geometry.PinWorld(project, target, endpoint.CavityId);
                         if (oldPoint is null || expected is null) continue;
                         var endIndex = route.Points[0].DistanceTo(oldPoint.Value) <= route.Points[^1].DistanceTo(oldPoint.Value) ? 0 : points.Count - 1;
@@ -164,10 +201,10 @@ public static class HarnessOperations
         var positionCommands = placements.Select(entry =>
         {
             var placement = entry.Key;
-            var before = placement.Position; var beforeRotation = placement.RotationDegrees;
+            var before = placement.Position; var beforeRotation = placement.RotationDegrees; var beforeScale = placement.DisplayScale;
             return new DelegateCommand("Positie",
-                () => { placement.Position = entry.Value.Position; placement.RotationDegrees = entry.Value.Rotation; },
-                () => { placement.Position = before; placement.RotationDegrees = beforeRotation; });
+                () => { placement.Position = entry.Value.Position; placement.RotationDegrees = entry.Value.Rotation; placement.DisplayScale = entry.Value.Scale; },
+                () => { placement.Position = before; placement.RotationDegrees = beforeRotation; placement.DisplayScale = beforeScale; });
         }).ToArray();
         return new CompositeCommand("Onderdelen verplaatsen", [.. positionCommands, .. routeCommands]);
     }
@@ -175,6 +212,8 @@ public static class HarnessOperations
     public static IEditCommand SetLayoutMode(HarnessProject project, DrawingView view, LayoutMode mode)
     {
         if (!Enum.IsDefined(mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+        if (mode == LayoutMode.Scaled && view.Components.Any(p => Math.Abs(p.DisplayScale - 1) > 1e-9))
+            throw new InvalidOperationException("Zet eerst alle afzonderlijke symboolschalen terug op 1 voordat dit aanzicht op schaal kan worden gezet.");
         if (mode == LayoutMode.Scaled)
             foreach (var route in view.Routes)
             {

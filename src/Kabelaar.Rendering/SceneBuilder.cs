@@ -77,10 +77,14 @@ public static partial class SceneBuilder
         bool Visible(string layer) => !layers.TryGetValue(layer, out var definition) || (definition.Visible && (!forPrint || definition.Print));
         bool Locked(string layer) => layers.TryGetValue(layer, out var definition) && definition.Locked;
         AddFrame(project, sheet, primitives);
+        if (draft)
+            primitives.Add(new SceneText(sheet.Id, "draft-watermark", "CONCEPT — NIET VOOR PRODUCTIE",
+                new(sheet.WidthMm * .18, sheet.HeightMm * .54), Math.Min(sheet.WidthMm / 35, 14), "#DEE3E6", true, -22) { Locked = true });
         Checkpoint("lookups-frame");
         foreach (var view in sheet.Views)
         {
             var scale = view.Scale * sheet.PrintScale;
+            var style = view.Style;
             if (!double.IsFinite(scale) || scale <= 0 || !Geometry.IsFinite(view.Origin))
                 throw new ArgumentException("Aanzicht heeft een ongeldige oorsprong of schaal.", nameof(sheet));
             Point2 SheetPoint(Point2 point) => view.Origin + point * scale;
@@ -104,7 +108,9 @@ public static partial class SceneBuilder
                 var splice = splices.GetValueOrDefault(placed.EntityId);
                 if (connector is null && splice is null) continue;
                 var appearance = new ComponentAppearance(view.Id, view.Origin, scale, placed.Id, placed.EntityId,
-                    placed.LayerId, Locked(placed.LayerId), placed.Position, placed.RotationDegrees, placed.LabelOffset);
+                    placed.LayerId, Locked(placed.LayerId), placed.Position, placed.RotationDegrees, placed.LabelOffset,
+                    placed.DisplayScale, placed.ShowPins, placed.ShowPinNumbers, placed.ShowLabel, placed.ShowPartNumber,
+                    placed.LabelFontSizeMm, style.ConnectorLineWidthMm);
                 var projection = ProjectComponent(placed, appearance, connector, splice,
                     connector is null ? null : visualParts.GetValueOrDefault(connector.PartId));
                 projectedComponents.Add(projection);
@@ -122,7 +128,9 @@ public static partial class SceneBuilder
                 var paths = twist.ConductorIds.Where(wirePaths.ContainsKey).Select(id => wirePaths[id]).Where(p => p.Count >= 2).ToArray();
                 if (paths.Length != twist.ConductorIds.Count || paths.Length < 2) continue;
                 for (var i = 0; i < twist.ConductorIds.Count; i++)
-                    twistedPaths[twist.ConductorIds[i]] = TwistTogether(paths, i, twist.PitchMm);
+                    twistedPaths[twist.ConductorIds[i]] = TwistTogether(paths, i,
+                        style.TwistDisplayPitchMm > 0 ? style.TwistDisplayPitchMm : twist.PitchMm,
+                        style.TwistAmplitudeMm, style.TwistDisplayMode);
             }
             Checkpoint("resolve-wire-paths");
 
@@ -153,6 +161,45 @@ public static partial class SceneBuilder
                 }
             }
             Checkpoint("jackets");
+            var twistLabels = new List<(SceneText Text, string Layer)>();
+            if (style.ShowTwistLabels)
+                foreach (var twist in project.Assembly.TwistGroups)
+                {
+                    var wire = twist.ConductorIds.Select(id => conductors.GetValueOrDefault(id)).FirstOrDefault(w => w is not null);
+                    if (wire is null || !wirePaths.TryGetValue(wire.Id, out var path) || path.Count == 0) continue;
+                    var midpoints = twist.ConductorIds.Where(id => wirePaths.TryGetValue(id, out var p) && p.Count > 0)
+                        .Select(id => Midpoint(wirePaths[id])).ToArray();
+                    var centre = new Point2(midpoints.Average(p => p.X), midpoints.Average(p => p.Y));
+                    var layer = wire.BranchIds.Select(id => routePlacements.GetValueOrDefault(id)).FirstOrDefault(r => r is not null)?.LayerId ?? "main";
+                    if (Visible(layer))
+                        twistLabels.Add((new SceneText(twist.Id, "twist-label",
+                            $"{twist.Name} · {twist.ConductorIds.Count} aders · spoed {Number(twist.PitchMm)} mm",
+                            SheetPoint(centre) + new Point2(0, -6 * scale), 2.5 * scale, Muted), layer));
+                }
+            var annotationPrimitives = view.Annotations.Where(a => Visible(a.LayerId))
+                .Select(a => (Annotation: a, Primitives: AnnotationPrimitives(project, view, a, scale).ToArray())).ToArray();
+            WireLabelLayout? labels = null;
+            if (style.ShowWireLabels)
+            {
+                labels = new(new(sheet.MarginMm, sheet.MarginMm,
+                    sheet.WidthMm - sheet.MarginMm * 2, sheet.HeightMm - sheet.MarginMm * 2));
+                foreach (var text in primitives.OfType<SceneText>().Where(t => t.Category != "draft-watermark"))
+                    labels.Reserve(text.Bounds);
+                foreach (var (text, _) in twistLabels) labels.Reserve(text.Bounds);
+                foreach (var component in projectedComponents.Where(c => Visible(c.Appearance.Layer)))
+                {
+                    SceneBounds? body = null;
+                    foreach (var primitive in component.Primitives)
+                    {
+                        if (primitive.Category is "connector-symbol" or "splice")
+                            body = body is { } prior ? prior.Union(primitive.Bounds) : primitive.Bounds;
+                        else if (primitive is SceneText) labels.Reserve(primitive.Bounds);
+                    }
+                    if (body is { } bounds) labels.Reserve(bounds);
+                }
+                foreach (var primitive in annotationPrimitives.SelectMany(a => a.Primitives).OfType<SceneText>())
+                    labels.Reserve(primitive.Bounds);
+            }
             var wireCache = WireProjectionCache.GetOrCreateValue(view);
             lock (wireCache)
             {
@@ -169,28 +216,24 @@ public static partial class SceneBuilder
                         points = twisted;
                     else if (wireOffsets.TryGetValue(wire.Id, out var offset))
                         points = Offset(points, offset);
+                    var label = labels?.Place(points, view.Origin, scale, WireLabel(wire.Name, wire.ColorCode, wire.CrossSectionMm2),
+                        style.WireLabelFontSizeMm * scale) ?? (new Point2(), new Point2());
+                    var lineWidth = style.WireLineWidthMm * (style.UseWireSectionWidth
+                        ? Math.Clamp(Math.Sqrt(Math.Max(0, wire.CrossSectionMm2) / .5), 1, 2) : 1);
                     var appearance = new WireAppearance(view.Id, view.Origin, scale, layer, placement?.Id, Locked(layer),
                         wire.Name, wire.ColorCode, wire.Color, wire.CrossSectionMm2, twist is not null,
-                        wire.From.Kind == EndpointKind.Free, wire.To.Kind == EndpointKind.Free);
+                        wire.From.Kind == EndpointKind.Free, wire.To.Kind == EndpointKind.Free,
+                        lineWidth, style.ShowWireLabels, style.WireLabelFontSizeMm, label.Item1, label.Item2);
                     primitives.AddRange(ProjectWire(wireCache, wire.Id, points, appearance));
                 }
             }
-            foreach (var twist in project.Assembly.TwistGroups)
-            {
-                var wire = twist.ConductorIds.Select(id => conductors.GetValueOrDefault(id)).FirstOrDefault(w => w is not null);
-                if (wire is null || !wirePaths.TryGetValue(wire.Id, out var points) || points.Count == 0) continue;
-                var midpoints = twist.ConductorIds.Where(wirePaths.ContainsKey).Select(id => Midpoint(wirePaths[id])).ToArray();
-                var centre = new Point2(midpoints.Average(p => p.X), midpoints.Average(p => p.Y));
-                var layer = wire.BranchIds.Select(id => routePlacements.GetValueOrDefault(id)).FirstOrDefault(r => r is not null)?.LayerId ?? "main";
-                Add(new SceneText(twist.Id, "twist-label", $"{twist.Name} · {twist.ConductorIds.Count} aders · spoed {Number(twist.PitchMm)} mm",
-                    SheetPoint(centre) + new Point2(0, -6 * scale), 2.5 * scale, Muted), layer);
-            }
+            foreach (var (text, layer) in twistLabels) Add(text, layer);
             Checkpoint("wires");
             foreach (var projection in projectedComponents)
                 if (Visible(projection.Appearance.Layer)) primitives.AddRange(projection.Primitives);
-            foreach (var annotation in view.Annotations.Where(a => Visible(a.LayerId)))
+            foreach (var (annotation, built) in annotationPrimitives)
             {
-                foreach (var primitive in AnnotationPrimitives(project, view, annotation, scale))
+                foreach (var primitive in built)
                     Add(primitive with { Locked = annotation.Locked }, annotation.LayerId, annotation.Id);
             }
             Checkpoint("components-annotations");
@@ -200,8 +243,6 @@ public static partial class SceneBuilder
         }
         if (draft)
         {
-            primitives.Add(new SceneText(sheet.Id, "draft-watermark", "CONCEPT — NIET VOOR PRODUCTIE",
-                new(sheet.WidthMm * .18, sheet.HeightMm * .54), Math.Min(sheet.WidthMm / 35, 14), "#C8CDD1", true, -22) { Locked = true });
             primitives.Add(new SceneText(sheet.Id, "draft-status", "CONCEPT", new(sheet.MarginMm + 2, sheet.HeightMm - sheet.MarginMm - 2), 3.5, "#B05B28", true) { Locked = true });
         }
         var scene = IndexedScene(sheet, draft, primitives);
@@ -225,8 +266,8 @@ public static partial class SceneBuilder
     private static IReadOnlyList<Point2> ResolveConductorPoints(Conductor wire, Point2? start, Point2? end, IReadOnlyDictionary<string, IReadOnlyList<Point2>> routes)
     {
         if (wire.BranchIds.Count == 1 && routes.TryGetValue(wire.BranchIds[0], out var direct) && direct.Count >= 2 &&
-            (start is null || start.Value.DistanceTo(direct[0]) <= 1e-8) &&
-            (end is null || end.Value.DistanceTo(direct[^1]) <= 1e-8))
+            (start is null || start.Value == direct[0]) &&
+            (end is null || end.Value == direct[^1]))
             return direct;
         var result = new List<Point2>();
         if (start is { } p) result.Add(p);
@@ -242,7 +283,11 @@ public static partial class SceneBuilder
         }
         // A conductor is shown only in views containing its route or both endpoints.
         if (result.Count <= 1 && (start is null || end is null)) return [];
-        if (end is { } q && (result.Count == 0 || result[^1].DistanceTo(q) > 1e-8)) result.Add(q);
+        if (end is { } q)
+        {
+            if (result.Count == 0 || result[^1].DistanceTo(q) > 1e-8) result.Add(q);
+            else result[^1] = q;
+        }
         return result;
     }
 
@@ -261,8 +306,16 @@ public static partial class SceneBuilder
         return result;
     }
 
-    private static IReadOnlyList<Point2> TwistTogether(IReadOnlyList<Point2>[] paths, int strand, double pitch)
+    private static IReadOnlyList<Point2> TwistTogether(IReadOnlyList<Point2>[] paths, int strand, double pitch,
+        double amplitude, TwistDisplayMode mode)
     {
+        // Electrical From/To direction is independent of the direction of a drawn bundle.
+        // Align paths before averaging, then return each strand in its original direction.
+        var first = paths[0];
+        var reversed = paths.Select(path =>
+            first[0].DistanceTo(path[^1]) + first[^1].DistanceTo(path[0]) <
+            first[0].DistanceTo(path[0]) + first[^1].DistanceTo(path[^1])).ToArray();
+        paths = paths.Select((path, i) => reversed[i] ? (IReadOnlyList<Point2>)path.Reverse().ToArray() : path).ToArray();
         var lengths = paths.Select(p => Geometry.Length(p)).ToArray();
         var length = lengths.Average();
         pitch = Math.Max(2, pitch);
@@ -271,15 +324,33 @@ public static partial class SceneBuilder
         var centre = Enumerable.Range(0, samples + 1).Select(i =>
             new Point2(sampled.Average(path => path[i].X), sampled.Average(path => path[i].Y))).ToArray();
         var result = new List<Point2>(samples + 1);
+        var markerCentres = length < 80 ? new[] { length * .5 } : new[] { length / 3, length * 2 / 3 };
+        var markerHalfWidth = Math.Min(pitch * 1.4, length * .15);
         for (var i = 0; i <= samples; i++)
         {
             var along = length * i / samples;
-            var fade = Math.Clamp(Math.Min(along, length - along) / 15, 0, 1);
+            var lead = mode == TwistDisplayMode.Full ? 15 : Math.Max(1, Math.Min(8, length / 4));
+            var fade = Math.Clamp(Math.Min(along, length - along) / lead, 0, 1);
             var delta = centre[Math.Min(samples, i + 1)] - centre[Math.Max(0, i - 1)];
             var normal = delta.Length < 1e-9 ? new Point2() : new Point2(-delta.Y / delta.Length, delta.X / delta.Length);
             var wave = Math.Sin(along / pitch * Math.PI * 2 + strand * Math.PI * 2 / paths.Length);
-            result.Add(sampled[strand][i] * (1 - fade) + centre[i] * fade + normal * (1.1 * wave * fade));
+            var parallel = strand - (paths.Length - 1) / 2.0;
+            double offset;
+            if (mode == TwistDisplayMode.Parallel) offset = parallel;
+            else if (mode == TwistDisplayMode.Markers)
+            {
+                // A short twist indication leaves most of a long harness route calm and parallel.
+                var distance = markerCentres.Min(c => Math.Abs(c - along));
+                var blend = markerHalfWidth <= 0 ? 0 : Math.Clamp((markerHalfWidth - distance) / Math.Max(.1, pitch * .4), 0, 1);
+                blend = blend * blend * (3 - 2 * blend);
+                offset = parallel * (1 - blend) + wave * blend;
+            }
+            else offset = wave;
+            result.Add(sampled[strand][i] * (1 - fade) + centre[i] * fade + normal * (amplitude * offset * fade));
         }
+        result[0] = paths[strand][0];
+        result[^1] = paths[strand][^1];
+        if (reversed[strand]) result.Reverse();
         return result;
     }
 
@@ -429,12 +500,7 @@ public static partial class SceneBuilder
 
     private static IEnumerable<ScenePrimitive> Table(HarnessProject project, Annotation annotation, Point2 origin, double fontSize, double scale)
     {
-        var (defaults, rows) = TableData(project, annotation.Kind);
-        if (annotation.Kind == AnnotationKind.PinTable && annotation.EntityId is { } connectorId)
-        {
-            var connectorName = project.Assembly.Connectors.Find(c => c.Id == connectorId)?.Name;
-            rows = rows.Where(row => row.GetValueOrDefault("Connector") == connectorName).ToArray();
-        }
+        var (defaults, rows) = TableData(project, annotation.Kind, annotation.EntityId);
         var columns = annotation.Columns.Count > 0 ? annotation.Columns : defaults;
         if (columns.Count == 0) yield break;
         var width = Math.Max(30, annotation.WidthMm * scale);
@@ -497,18 +563,30 @@ public static partial class SceneBuilder
         return output;
     }
 
-    public static (IReadOnlyList<string> Columns, IReadOnlyList<Dictionary<string, string>> Rows) TableData(HarnessProject project, AnnotationKind kind)
+    public static (IReadOnlyList<string> Columns, IReadOnlyList<Dictionary<string, string>> Rows) TableData(
+        HarnessProject project, AnnotationKind kind, string? connectorId = null)
     {
         Dictionary<string, string> Row(params (string Key, object? Value)[] values) =>
             values.ToDictionary(x => x.Key, x => x.Value is double number ? number.ToString("0.######", CultureInfo.InvariantCulture) : Convert.ToString(x.Value, CultureInfo.InvariantCulture) ?? "", StringComparer.OrdinalIgnoreCase);
+        IEnumerable<WireRow> WireRows()
+        {
+            var rows = HarnessReports.Wires(project);
+            if (connectorId is null) return rows;
+            var associated = project.Assembly.Conductors
+                .Where(w => w.From.EntityId == connectorId || w.To.EntityId == connectorId)
+                .ToDictionary(w => w.Id, w => w.From.EntityId != connectorId);
+            return rows.Where(w => associated.ContainsKey(w.Id))
+                .Select(w => associated[w.Id] ? w with { From = w.To, To = w.From } : w);
+        }
         return kind switch
         {
             AnnotationKind.WireTable => (["Name", "From", "To", "Color", "CrossSectionMm2", "CutLengthMm"],
-                HarnessReports.Wires(project).Select(w => Row(("Name", w.Name), ("From", w.From), ("To", w.To), ("PartNumber", w.PartNumber), ("Color", w.Color),
+                WireRows().Select(w => Row(("Name", w.Name), ("From", w.From), ("To", w.To), ("PartNumber", w.PartNumber), ("Color", w.Color),
                     ("CrossSectionMm2", w.CrossSectionMm2), ("RouteLengthMm", w.RouteLengthMm), ("AllowanceMm", w.AllowanceMm), ("CutLengthMm", w.CutLengthMm),
                     ("LengthSource", w.LengthSource), ("Signal", w.Signal), ("Cable", w.Cable))).ToArray()),
             AnnotationKind.PinTable => (["Connector", "Pin", "Wires", "Connections", "Terminal", "Seal"],
-                HarnessReports.Pins(project).Select(p => Row(("Connector", p.Connector), ("Pin", p.Pin), ("State", p.State), ("Terminal", p.Terminal),
+                HarnessReports.Pins(project).Where(p => connectorId is null || p.ConnectorId == connectorId)
+                    .Select(p => Row(("Connector", p.Connector), ("Pin", p.Pin), ("State", p.State), ("Terminal", p.Terminal),
                     ("Seal", p.Seal), ("Plug", p.Plug), ("Wires", p.Wires), ("Connections", p.Connections))).ToArray()),
             AnnotationKind.BomTable => (["PartNumber", "Description", "Quantity", "Unit"],
                 HarnessReports.Bom(project).Select(b => Row(("PartNumber", b.PartNumber), ("Description", b.Description), ("Kind", b.Kind),

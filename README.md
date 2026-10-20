@@ -3,7 +3,7 @@
 Windows-desktopapp voor productietekeningen van kabelbomen. C# / .NET 10, WPF,
 SkiaSharp en een apart C++/Open CASCADE-proces voor STEP.
 
-De huidige versie is **0.9.0, lokale acceptatieversie**. De aanduiding 1.0 is
+De huidige versie is **0.9.2, lokale acceptatieversie**. De aanduiding 1.0 is
 gereserveerd voor de volledige praktijktest, inclusief installatie op een tweede
 pc en beoordeling van een echte productietekening. Er is geen publieke updatefeed.
 
@@ -30,6 +30,29 @@ oorspronkelijke PDF en de gebruikte afbeelding worden in het project opgenomen.
 
 Een bibliotheekbewerking maakt een nieuwe onderdeelrevisie. Bestaande toepassingen
 worden alleen na het verschillenoverzicht en een expliciete keuze bijgewerkt.
+
+## Tekenstijl en leesbaarheid
+
+Open **Beeld → Tekenstijl…**, of gebruik **Tekenstijl…** bij de projecteigenschappen
+wanneer niets is geselecteerd. De instellingen gelden uitsluitend voor het actieve
+aanzicht; een detailaanzicht kan een andere opmaak behouden.
+
+- **Productieoverzicht** gebruikt dunne contouren, duidelijkere voedingsdraden en
+  korte twistmarkeringen. Connectornamen blijven zichtbaar; automatische
+  aderlabels, twistlabels, artikelnummers, pinnummers en pindots worden verborgen.
+- **Aansluitdetail** toont de labels en pininformatie. Lijndiktes, teksthoogte,
+  twistuitwijking en getekende spoed zijn afzonderlijk instelbaar.
+- Selecteer een connector om de naam, artikel- en pininformatie, teksthoogte en
+  labelpositie per plaatsing te wijzigen. In **vrije opmaak** kun je ook de
+  connectorvergroting aanpassen. Splices hebben eigen labelinstellingen.
+- Selecteer een aansluit- of pinlijst en kies bij **Aansluitingen van** één
+  connector of alle connectoren. De tabel blijft gekoppeld aan de fysieke gegevens.
+
+Een voorinstelling verandert de tekening pas na **Toepassen**. Eén keer
+**Ongedaan maken** herstelt de volledige wijziging. Weergavewijzigingen behouden
+aansluitidentiteiten, materiaalaantallen en productielengtes; getekende twistspoed
+staat los van de fysieke spoed. Ook verborgen pindots blijven beschikbaar voor
+snapping. In een aanzicht **op schaal** blijft de connectorvergroting 1.
 
 ## Geometrie en productiegegevens
 
@@ -72,6 +95,13 @@ automatisch passend maken en controleer de maatlijn vóór gebruik op ware groot
 `.kabelaar` is een ZIP-pakket met versieerbare JSON en ingesloten assets.
 Bronbestanden of de lokale bibliotheek zijn op de ontvangende pc niet nodig.
 Onderdeelbibliotheken gebruiken `.kabelaarlib`, sjablonen `.kabelaartemplate`.
+
+Vanaf 0.9.2 gebruiken opgeslagen projecten **schema 2** voor de nieuwe
+aanzichtinstellingen. De app opent ook schema-1-projecten, behoudt de fysieke
+gegevens en tekenobjecten en vult de nieuwe stijlvelden met standaardwaarden.
+Openen wijzigt het bronbestand niet; na opslaan
+gebruikt het pakket schema 2. Kabelaar 0.9.1 en ouder weigeren dit nieuwere schema,
+zodat zij de nieuwe opmaak niet stilzwijgend verliezen.
 
 Opslaan gebruikt een tijdelijk bestand en een atomische vervanging met herstelbare
 vorige versie. Een lokale lock plus inhoudsvingerafdruk signaleren bekende

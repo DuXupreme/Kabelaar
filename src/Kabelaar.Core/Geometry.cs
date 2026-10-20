@@ -70,6 +70,9 @@ public static class Geometry
                    point.X * Math.Sin(r) + point.Y * Math.Cos(r) + offset.Y);
     }
 
+    public static Point2 ComponentWorld(PlacedComponent placement, Point2 local) =>
+        Transform(local * placement.DisplayScale, placement.RotationDegrees, placement.Position);
+
     public static Point2? PinWorld(HarnessProject project, PlacedComponent placement, string? cavityId)
     {
         var connector = project.Assembly.Connectors.Find(c => c.Id == placement.EntityId);
@@ -77,7 +80,7 @@ public static class Geometry
         var cavity = connector.Cavities.Find(c => c.Id == cavityId);
         var part = project.Parts.Find(p => p.Id == connector.PartId);
         var pin = part?.Pins.Find(p => p.Id == cavity?.PinDefinitionId);
-        return pin is null ? null : Transform(pin.Position, placement.RotationDegrees, placement.Position);
+        return pin is null ? null : ComponentWorld(placement, pin.Position);
     }
 
     public static Point2? EndpointPosition(HarnessProject project, DrawingView view, Endpoint endpoint)

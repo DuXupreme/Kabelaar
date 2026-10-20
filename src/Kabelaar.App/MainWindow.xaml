@@ -85,6 +85,7 @@
         <MenuItem Header="Nieuw blad" Click="AddSheet_Click"/>
         <MenuItem Header="Nieuw detailaanzicht" Click="AddView_Click"/>
         <MenuItem Header="Bladinstellingen…" Click="SheetSettings_Click"/>
+        <MenuItem Header="Tekenstijl…" Click="DrawingStyle_Click"/>
         <MenuItem Header="Lagen…" Click="Layers_Click"/>
       </MenuItem>
       <MenuItem Header="_Productie">

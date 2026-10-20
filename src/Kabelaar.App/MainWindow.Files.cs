@@ -237,6 +237,7 @@ public partial class MainWindow
         "3. Kies Ader: klik een pin, eventuele bochten en de eindpin. Enter of rechtsklik rondt af.\n" +
         "4. Vul aansluitingen, draadartikel, kleuren, maten en gemonteerde terminals in bij Eigenschappen.\n" +
         "5. Plaats maatlijnen en gegenereerde tabellen. Controleer het project vóór productie-export.\n\n" +
+        "Beeld > Tekenstijl: kies een rustig productieoverzicht of een aansluitdetail. Per connector kun je labels, pinnummers en vergroting instellen.\n\n" +
         "Muiswiel = zoomen bij cursor • Middenmuis / spatie+slepen = pannen\n" +
         "Ctrl+klik = meerdere objecten selecteren • Leeg gebied slepen = selectiekader\n" +
         "Esc = selecteren • W = ader • R = 90° draaien • Delete = verwijderen\n" +

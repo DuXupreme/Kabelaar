@@ -31,7 +31,15 @@ public partial class App : Application
         var interactiveSmoke = e.Args.Contains("--smoke-test") && e.Args.Contains("--interactive-smoke");
         _backgroundAcceptance = backgroundTest;
         if ((backgroundTest && !interactiveSmoke) || e.Args.Contains("--no-activate")) window.ShowActivated = false;
-        if (backgroundTest && !interactiveSmoke) window.ShowInTaskbar = false;
+        if (backgroundTest && !interactiveSmoke)
+        {
+            window.ShowInTaskbar = false;
+            // Exercise a fully laid-out WPF window without obscuring the user's applications.
+            window.Opacity = 0;
+            window.WindowStartupLocation = WindowStartupLocation.Manual;
+            window.Left = -32000;
+            window.Top = -32000;
+        }
         if (e.Args.Contains("--smoke-test"))
         {
             window.Loaded += async (_, _) =>

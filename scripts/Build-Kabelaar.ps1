@@ -1,6 +1,6 @@
 #requires -Version 7.0
 param(
-    [string]$Version = '0.9.0',
+    [string]$Version = '0.9.2',
     [string]$ArtifactDirectory = '',
     [switch]$BuildNative,
     [switch]$SkipTests,
