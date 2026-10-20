@@ -41,6 +41,8 @@ public partial class App : Application
         }
         else if (e.Args.Contains("--installed-acceptance"))
         {
+            // The clean-close stage must observe Closed and write its result before exit.
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
             window.Loaded += async (_, _) =>
             {
                 try { await window.RunInstalledAcceptanceAsync(e.Args); Shutdown(0); }

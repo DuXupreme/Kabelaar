@@ -13,6 +13,7 @@ namespace Kabelaar.App;
 
 public partial class MainWindow
 {
+    private bool _closeConfirmationPending;
     private async void New_Click(object sender, RoutedEventArgs e)
     {
         if (!await ConfirmLeaveAsync()) return;
@@ -120,9 +121,18 @@ public partial class MainWindow
     {
         if (_closing) return;
         e.Cancel = true;
-        if (!await ConfirmLeaveAsync()) return;
-        _autosave.Stop(); _validationTimer.Stop(); _lease?.Dispose();
-        _closing = true; Close();
+        if (_closeConfirmationPending) return;
+        _closeConfirmationPending = true;
+        try
+        {
+            if (!await ConfirmLeaveAsync()) return;
+            _autosave.Stop(); _validationTimer.Stop(); _lease?.Dispose(); _lease = null;
+            _closing = true;
+            // ConfirmLeaveAsync can complete synchronously for a clean document.
+            // WPF forbids calling Close again until the current Closing callback returns.
+            _ = Dispatcher.BeginInvoke(new Action(() => { if (IsLoaded) Close(); }));
+        }
+        finally { _closeConfirmationPending = false; }
     }
     private async Task AutoSaveAsync()
     {

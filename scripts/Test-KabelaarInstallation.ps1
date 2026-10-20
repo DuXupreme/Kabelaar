@@ -201,6 +201,9 @@ $recoveryReport = Read-Success (Join-Path $crashDirectory 'recovery-result.json'
 $guardDirectory = Join-Path $OutputDirectory 'update-guards'
 Invoke-Stage 'guards' $guardDirectory
 $guardReport = Read-Success (Join-Path $guardDirectory 'guards-result.json')
+$closeDirectory = Join-Path $OutputDirectory 'normal-clean-close'
+Invoke-Stage 'clean-close' $closeDirectory
+$closeReport = Read-Success (Join-Path $closeDirectory 'clean-close-result.json')
 Invoke-Stage 'cleanup-profile' $profileDirectory
 Verify-UserData $before
 
@@ -221,6 +224,7 @@ Verify-UserData $before
     installedRoot=$InstalledRoot; userDataRoot=$userData; verifiedRuntimeFiles=$verifiedFiles
     existingUserFilesPreserved=@($before).Count; actualShellLaunches=$shellReports.Count
     timedAutosaveSeconds=$recoveryReport.timedAutosaveSeconds; updateGuardChecks=$guardReport.checks
+    normalCleanClose=$closeReport.closed
     evidenceScope='Actual installed processes and shell launches; scripted confirmation answers, no mouse/keyboard visual acceptance.'
 } | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath (Join-Path $OutputDirectory 'installed-acceptance-result.json') -Encoding utf8
 "Installed acceptance passed: $OutputDirectory"

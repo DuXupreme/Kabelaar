@@ -119,6 +119,7 @@ public partial class MainWindow
                 case "verify-update": await VerifyAcceptanceUpdateAsync(output); break;
                 case "seed-profile": await SeedAcceptanceProfileAsync(output); break;
                 case "cleanup-profile": await CleanupAcceptanceProfileAsync(output); break;
+                case "clean-close": await CheckNormalCleanCloseAsync(output); break;
                 default: throw new ArgumentException("Unknown installed acceptance stage: " + stage);
             }
         }
@@ -131,6 +132,27 @@ public partial class MainWindow
         {
             _closing = true; _autosave.Stop(); _validationTimer.Stop(); _lease?.Dispose(); _lease = null;
         }
+    }
+
+    private async Task CheckNormalCleanCloseAsync(string output)
+    {
+        if (_closing || _history.IsDirty || !IsLoaded)
+            throw new InvalidOperationException("Clean-close acceptance requires a normally open, clean window.");
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closingCalls = 0;
+        Closing += (_, _) => closingCalls++;
+        Closed += (_, _) => closed.TrySetResult();
+        // Do not set _closing: this deliberately exercises the real first Closing callback,
+        // including synchronous confirmation and its dispatcher-deferred second Close.
+        Close();
+        await closed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        if (IsVisible || closingCalls != 2 || _lease is not null)
+            throw new InvalidOperationException("Normal clean close did not complete exactly one deferred closing sequence.");
+        await AcceptanceArguments.Write(output, "clean-close-result.json", new
+        {
+            success = true, identity = AcceptanceArguments.Identity(), closingCalls, closed = true,
+            productionClosingHandler = true, firstConfirmationCompletedSynchronously = true
+        });
     }
 
     private async Task SeedAcceptanceProfileAsync(string output)
