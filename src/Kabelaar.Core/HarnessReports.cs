@@ -86,6 +86,42 @@ public static class HarnessReports
             }).OrderBy(r => r.Kind).ThenBy(r => r.PartNumber).ToArray();
     }
 
+    // Same contribution order as Bom, without rebuilding labels, groups or reference text.
+    internal static Dictionary<(string PartId, string Unit), double> BomQuantities(HarnessProject project)
+    {
+        var totals = new Dictionary<(string PartId, string Unit), double>();
+        void Add(string? id, double quantity, string unit)
+        {
+            if (!string.IsNullOrWhiteSpace(id)) totals[(id, unit)] = totals.GetValueOrDefault((id, unit)) + quantity;
+        }
+        foreach (var connector in project.Assembly.Connectors.Where(c => c.IncludedInAssembly))
+        {
+            Add(connector.PartId, 1, "st");
+            foreach (var cavity in connector.Cavities)
+            {
+                Add(cavity.TerminalPartId, 1, "st"); Add(cavity.SealPartId, 1, "st"); Add(cavity.PlugPartId, 1, "st");
+            }
+            foreach (var item in connector.Accessories) Add(item.PartId, item.Quantity, item.Unit);
+        }
+        foreach (var splice in project.Assembly.Splices) Add(splice.PartId, 1, "st");
+        foreach (var cable in project.Assembly.Cables) Add(cable.PartId, cable.CutLengthMm / 1000, "m");
+        var lengths = project.Assembly.Branches.GroupBy(b => b.Id).ToDictionary(g => g.Key, g => g.First().PhysicalLengthMm);
+        foreach (var wire in project.Assembly.Conductors)
+        {
+            if (wire.CableId is not null) continue;
+            var length = wire.ManualCutLengthMm;
+            if (wire.LengthSource != LengthSource.Manual)
+            {
+                double route = 0;
+                foreach (var id in wire.BranchIds) route += lengths.GetValueOrDefault(id);
+                length = route + wire.StartAllowanceMm + wire.EndAllowanceMm + wire.ProcessingAllowanceMm;
+            }
+            Add(wire.WirePartId, length / 1000, "m");
+        }
+        foreach (var material in project.Assembly.Materials) Add(material.PartId, material.Quantity, material.Unit);
+        return totals;
+    }
+
     public static IReadOnlyList<PinRow> Pins(HarnessProject project)
     {
         var partNumbers = project.Parts.GroupBy(p => p.Id).ToDictionary(g => g.Key, g => g.First().PartNumber);

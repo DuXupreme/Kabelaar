@@ -86,44 +86,49 @@ public static class SkiaSceneRenderer
         canvas.Restore();
     }
 
-    private static SKImage Rasterize(DrawingScene scene, SceneBounds bounds, double density, bool indexed)
+    private static ScreenSceneCache.Raster Rasterize(DrawingScene scene, SceneBounds bounds, double density, bool indexed)
     {
         var width = Math.Max(1, (int)Math.Round(bounds.Width * density));
         var height = Math.Max(1, (int)Math.Round(bounds.Height * density));
-        using var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul))
+        var surface = SKSurface.Create(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul))
             ?? throw new InvalidOperationException("Onvoldoende geheugen voor de tekenweergave.");
-        var canvas = surface.Canvas;
-        canvas.Clear(SKColors.Transparent);
-        canvas.Scale((float)density);
-        canvas.Translate((float)-bounds.Left, (float)-bounds.Top);
-        if (indexed)
+        try
         {
-            foreach (var primitive in scene.Index.Query(bounds.Inflate(2 / density))) DrawPrimitive(canvas, primitive, false);
+            var canvas = surface.Canvas;
+            canvas.Clear(SKColors.Transparent);
+            canvas.Scale((float)density);
+            canvas.Translate((float)-bounds.Left, (float)-bounds.Top);
+            if (indexed)
+            {
+                foreach (var primitive in scene.Index.Query(bounds.Inflate(2 / density))) DrawPrimitive(canvas, primitive, false);
+            }
+            else Render(canvas, scene);
+            return new(surface, width, height);
         }
-        else Render(canvas, scene);
-        return surface.Snapshot();
+        catch { surface.Dispose(); throw; }
     }
 
-    private static SKImage PatchRaster(DrawingScene scene, SKImage previous, SceneBounds bounds, double density, SceneBounds dirty)
+    private static void PatchRaster(DrawingScene scene, ScreenSceneCache.Raster raster, SceneBounds bounds, double density, SceneBounds dirty)
     {
-        if (!bounds.Intersects(dirty)) return previous;
-        using var surface = SKSurface.Create(new SKImageInfo(previous.Width, previous.Height, SKColorType.Bgra8888, SKAlphaType.Premul))
-            ?? throw new InvalidOperationException("Onvoldoende geheugen voor de tekenweergave.");
-        var canvas = surface.Canvas;
-        canvas.Clear(SKColors.Transparent);
-        canvas.DrawImage(previous, 0, 0, new SKSamplingOptions(SKFilterMode.Nearest));
-        canvas.Scale((float)density);
-        canvas.Translate((float)-bounds.Left, (float)-bounds.Top);
-        // Pixel-align the cleared region so that repainting cannot leave a one-pixel antialias fringe.
-        var left = Math.Floor(dirty.Left * density - 1) / density;
-        var top = Math.Floor(dirty.Top * density - 1) / density;
-        var right = Math.Ceiling(dirty.Right * density + 1) / density;
-        var bottom = Math.Ceiling(dirty.Bottom * density + 1) / density;
-        var clip = new SceneBounds(left, top, right - left, bottom - top);
-        canvas.ClipRect(Rect(clip), SKClipOperation.Intersect, false);
-        canvas.DrawColor(SKColors.Transparent, SKBlendMode.Clear);
-        foreach (var primitive in scene.Index.Query(clip.Inflate(2 / density))) DrawPrimitive(canvas, primitive, false);
-        return surface.Snapshot();
+        if (!bounds.Intersects(dirty)) return;
+        raster.BeginUpdate();
+        var canvas = raster.Surface.Canvas;
+        canvas.Save();
+        try
+        {
+            canvas.Scale((float)density);
+            canvas.Translate((float)-bounds.Left, (float)-bounds.Top);
+            // Pixel-align the cleared region so that repainting cannot leave a one-pixel antialias fringe.
+            var left = Math.Floor(dirty.Left * density - 1) / density;
+            var top = Math.Floor(dirty.Top * density - 1) / density;
+            var right = Math.Ceiling(dirty.Right * density + 1) / density;
+            var bottom = Math.Ceiling(dirty.Bottom * density + 1) / density;
+            var clip = new SceneBounds(left, top, right - left, bottom - top);
+            canvas.ClipRect(Rect(clip), SKClipOperation.Intersect, false);
+            canvas.DrawColor(SKColors.Transparent, SKBlendMode.Clear);
+            foreach (var primitive in scene.Index.Query(clip.Inflate(2 / density))) DrawPrimitive(canvas, primitive, false);
+        }
+        finally { canvas.Restore(); }
     }
 
     private static void DrawSelection(SKCanvas canvas, DrawingScene scene, ISet<string>? selectedIds)

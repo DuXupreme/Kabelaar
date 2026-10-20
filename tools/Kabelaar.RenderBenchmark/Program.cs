@@ -5,6 +5,7 @@ using Kabelaar.Rendering;
 using SkiaSharp;
 
 var output = Path.GetFullPath(args.FirstOrDefault() ?? "artifacts/render-benchmark");
+var editsOnly = args.Contains("--edits-only");
 Directory.CreateDirectory(output);
 var project = DemoFactory.CreateAcceptancePerformance();
 var sheet = project.Sheets[0];
@@ -38,23 +39,30 @@ object Summary(IEnumerable<double> values)
 }
 Paint(scene, zoom, false);
 Paint(scene, zoom, true);
-var vectors = Enumerable.Range(0, 100).Select(i => Measure(() => Paint(scene, zoom * (i % 2 == 0 ? 1.01 : 1), false))).ToArray();
+var vectors = editsOnly ? [] : Enumerable.Range(0, 100).Select(i => Measure(() => Paint(scene, zoom * (i % 2 == 0 ? 1.01 : 1), false))).ToArray();
 var rasters = Enumerable.Range(0, 100).Select(i => Measure(() => Paint(scene, zoom * (i % 2 == 0 ? 1.01 : 1), true))).ToArray();
 var builds = new List<double>();
 var edits = new List<double>();
 var phases = new Dictionary<string, List<double>>();
+var coldEdits = new List<double>();
+var buildAllocations = new List<long>();
 var changed = sheet.Views[0].Components[0];
-for (var i = 0; i < 12; i++)
+for (var i = 0; i < 110; i++)
 {
-    changed.Position += new Point2(i % 2 == 0 ? 1 : -1, 0);
+    HarnessOperations.MoveComponent(project, sheet.Views[0], changed, changed.Position + new Point2(i % 2 == 0 ? 1 : -1, 0)).Execute();
     var start = Stopwatch.GetTimestamp();
-    builds.Add(Measure(() => scene = SceneBuilder.Build(project, sheet, timing: (name, milliseconds) =>
+    var allocationStart = GC.GetAllocatedBytesForCurrentThread();
+    var buildTime = Measure(() => scene = SceneBuilder.Build(project, sheet, timing: (name, milliseconds) =>
     {
+        if (i < 10) return;
         if (!phases.TryGetValue(name, out var samples)) phases[name] = samples = [];
         samples.Add(milliseconds);
-    })));
+    }));
+    var allocated = GC.GetAllocatedBytesForCurrentThread() - allocationStart;
     Paint(scene, zoom, true);
-    edits.Add(Stopwatch.GetElapsedTime(start).TotalMilliseconds);
+    var elapsed = Stopwatch.GetElapsedTime(start).TotalMilliseconds;
+    if (i < 10) coldEdits.Add(elapsed);
+    else { builds.Add(buildTime); edits.Add(elapsed); buildAllocations.Add(allocated); }
 }
 using (var image = surface.Snapshot())
 using (var data = image.Encode(SKEncodedImageFormat.Png, 90))
@@ -71,8 +79,9 @@ var report = new
     utc = DateTime.UtcNow, environment = Environment.OSVersion.ToString(), processors = Environment.ProcessorCount,
     connectors = project.Assembly.Connectors.Count, conductors = project.Assembly.Conductors.Count,
     primitives = scene.Primitives.Count, width, height,
-    vectorFrames = Summary(vectors), cachedScreenFrames = Summary(rasters),
+    vectorFrames = vectors.Length == 0 ? null : Summary(vectors), cachedScreenFrames = Summary(rasters),
     sceneBuild = Summary(builds), sceneBuildAndFirstPaint = Summary(edits),
+    coldSceneBuildAndFirstPaint = Summary(coldEdits), averageManagedBytesPerBuild = buildAllocations.Average(),
     buildPhases = phases.ToDictionary(p => p.Key, p => Summary(p.Value)),
     cacheBytes = cache.CachedBytes, cacheImages = cache.ImageCount
 };

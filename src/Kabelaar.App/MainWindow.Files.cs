@@ -99,7 +99,7 @@ public partial class MainWindow
         }
         finally { newLease?.Dispose(); _saving = false; }
     }
-    private async Task<bool> ConfirmLeaveAsync()
+    private async Task<bool> ConfirmLeaveAsync(Func<MessageBoxResult>? decision = null)
     {
         if (_saving || _busy is not null) return false;
         _suspendAutosave = true;
@@ -107,7 +107,7 @@ public partial class MainWindow
         {
             while (_autosaving) await Task.Delay(20);
             if (!_history.IsDirty) { ClearRecoveryCopies(); return true; }
-            var result = MessageBox.Show(this, "Wil je de wijzigingen opslaan voordat je dit project sluit?",
+            var result = decision?.Invoke() ?? MessageBox.Show(this, "Wil je de wijzigingen opslaan voordat je dit project sluit?",
                 "Niet-opgeslagen werk", MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
             if (result == MessageBoxResult.Cancel) return false;
             if (result == MessageBoxResult.Yes) return await SaveAsync(false) && !_history.IsDirty;

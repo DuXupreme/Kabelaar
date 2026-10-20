@@ -60,9 +60,12 @@ public static partial class SceneBuilder
         var primitives = new List<ScenePrimitive>();
         var layers = FirstById(sheet.Layers, l => l.Id);
         var parts = FirstById(project.Parts, p => p.Id);
-        var pinsByPart = parts.ToDictionary(p => p.Key, p => FirstById(p.Value.Pins, pin => pin.Id));
         var branches = FirstById(project.Assembly.Branches, b => b.Id);
         var connectors = FirstById(project.Assembly.Connectors, c => c.Id);
+        var visualParts = new Dictionary<string, PartVisual>();
+        foreach (var connector in connectors.Values)
+            if (!visualParts.ContainsKey(connector.PartId) && parts.TryGetValue(connector.PartId, out var part))
+                visualParts.Add(connector.PartId, VisualPart(part));
         var splices = FirstById(project.Assembly.Splices, s => s.Id);
         var conductors = FirstById(project.Assembly.Conductors, w => w.Id);
         var wiresByBranch = project.Assembly.Conductors.SelectMany(w => w.BranchIds.Select(id => (id, wire: w))).ToLookup(x => x.id, x => x.wire);
@@ -99,19 +102,18 @@ public static partial class SceneBuilder
             });
             Checkpoint("flatten-routes");
             var endpointPositions = new Dictionary<(string Entity, string? Cavity), Point2>();
+            var projectedComponents = new List<ComponentProjection>(view.Components.Count);
             foreach (var placed in view.Components)
             {
-                if (connectors.GetValueOrDefault(placed.EntityId) is { } connector && parts.GetValueOrDefault(connector.PartId) is { } part)
-                {
-                    var pins = pinsByPart[part.Id];
-                    var (sin, cos) = Math.SinCos(placed.RotationDegrees * Math.PI / 180);
-                    foreach (var cavity in connector.Cavities)
-                        if (pins.TryGetValue(cavity.PinDefinitionId, out var pin))
-                            endpointPositions.TryAdd((connector.Id, cavity.Id), new(
-                                pin.Position.X * cos - pin.Position.Y * sin + placed.Position.X,
-                                pin.Position.X * sin + pin.Position.Y * cos + placed.Position.Y));
-                }
-                else if (splices.ContainsKey(placed.EntityId)) endpointPositions.TryAdd((placed.EntityId, null), placed.Position);
+                var connector = connectors.GetValueOrDefault(placed.EntityId);
+                var splice = splices.GetValueOrDefault(placed.EntityId);
+                if (connector is null && splice is null) continue;
+                var appearance = new ComponentAppearance(view.Id, view.Origin, scale, placed.Id, placed.EntityId,
+                    placed.LayerId, Locked(placed.LayerId), placed.Position, placed.RotationDegrees, placed.LabelOffset);
+                var projection = ProjectComponent(placed, appearance, connector, splice,
+                    connector is null ? null : visualParts.GetValueOrDefault(connector.PartId));
+                projectedComponents.Add(projection);
+                foreach (var endpoint in projection.Endpoints) endpointPositions.TryAdd(endpoint.Key, endpoint.Position);
             }
             Point2? EndpointPoint(Endpoint endpoint) => endpoint.Kind != EndpointKind.Free && endpoint.EntityId is { } entity
                 && endpointPositions.TryGetValue((entity, endpoint.Kind == EndpointKind.Splice ? null : endpoint.CavityId), out var point) ? point : null;
@@ -189,51 +191,8 @@ public static partial class SceneBuilder
                     SheetPoint(centre) + new Point2(0, -6 * scale), 2.5 * scale, Muted), layer);
             }
             Checkpoint("wires");
-            foreach (var placed in view.Components)
-            {
-                var connector = connectors.GetValueOrDefault(placed.EntityId);
-                var splice = splices.GetValueOrDefault(placed.EntityId);
-                var (sin, cos) = Math.SinCos(placed.RotationDegrees * Math.PI / 180);
-                Point2 ComponentPoint(Point2 p) => SheetPoint(new(p.X * cos - p.Y * sin + placed.Position.X, p.X * sin + p.Y * cos + placed.Position.Y));
-                var position = SheetPoint(placed.Position);
-                if (connector is not null)
-                {
-                    var part = parts.GetValueOrDefault(connector.PartId);
-                    if (part is not null && part.Symbol.Count > 0)
-                    {
-                        foreach (var symbolPath in part.Symbol)
-                        {
-                            var points = Geometry.Flatten(symbolPath.Points, symbolPath.Smooth).Select(ComponentPoint).ToArray();
-                            Add(new ScenePath(connector.Id, "connector-symbol", points, Ink, .3 * scale, Closed: symbolPath.Closed, Dashed: symbolPath.Hidden), placed.LayerId, placed.Id);
-                        }
-                    }
-                    else
-                    {
-                        var w = part?.WidthMm ?? 20; var h = part?.HeightMm ?? 12;
-                        Add(new ScenePath(connector.Id, "connector-symbol", new[] { new Point2(-w / 2, -h / 2), new Point2(w / 2, -h / 2), new Point2(w / 2, h / 2), new Point2(-w / 2, h / 2) }.Select(ComponentPoint).ToArray(),
-                            Ink, .3 * scale, "#FFFFFF", true), placed.LayerId, placed.Id);
-                    }
-                    foreach (var symbolLabel in part?.Labels ?? [])
-                        Add(new SceneText(connector.Id, "symbol-label", symbolLabel.Text, ComponentPoint(symbolLabel.Position),
-                            symbolLabel.HeightMm * scale, RotationDegrees: placed.RotationDegrees), placed.LayerId, placed.Id);
-                    var cavityByPin = FirstById(connector.Cavities, c => c.PinDefinitionId);
-                    foreach (var pin in part?.Pins ?? [])
-                    {
-                        var cavity = cavityByPin.GetValueOrDefault(pin.Id);
-                        var pinPoint = ComponentPoint(pin.Position);
-                        var fill = cavity?.State switch { CavityState.Occupied => "#137F8B", CavityState.Plugged => "#6C7A86", _ => "#FFFFFF" };
-                        Add(new SceneEllipse(connector.Id, "pin", pinPoint, .7 * scale, .7 * scale, Ink, .2 * scale, fill), placed.LayerId, placed.Id);
-                        Add(new SceneText(connector.Id, "pin-label", cavity?.Label ?? pin.Label, pinPoint + new Point2(1.2 * scale, -.7 * scale), 2 * scale), placed.LayerId, placed.Id);
-                    }
-                    Add(new SceneText(connector.Id, "connector-label", connector.Name, position + placed.LabelOffset * scale, 3 * scale, Bold: true), placed.LayerId, placed.Id);
-                    Add(new SceneText(connector.Id, "part-number", part?.PartNumber ?? "Onderdeel ontbreekt", position + placed.LabelOffset * scale + new Point2(0, 3.5 * scale), 2.3 * scale, Muted), placed.LayerId, placed.Id);
-                }
-                else if (splice is not null)
-                {
-                    Add(new SceneEllipse(splice.Id, "splice", position, 1.3 * scale, 1.3 * scale, Ink, .25, Ink), placed.LayerId, placed.Id);
-                    Add(new SceneText(splice.Id, "splice-label", splice.Name, position + placed.LabelOffset * scale, 2.5 * scale, Bold: true), placed.LayerId, placed.Id);
-                }
-            }
+            foreach (var projection in projectedComponents)
+                if (Visible(projection.Appearance.Layer)) primitives.AddRange(projection.Primitives);
             foreach (var annotation in view.Annotations.Where(a => Visible(a.LayerId)))
             {
                 foreach (var primitive in AnnotationPrimitives(project, view, annotation, scale))

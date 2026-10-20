@@ -7,9 +7,25 @@ namespace Kabelaar.Rendering;
 public sealed class ScreenSceneCache : IDisposable
 {
     internal readonly record struct Key(int Level, int X, int Y);
-    private sealed class Entry(SKImage image, long bytes)
+    internal sealed class Raster(SKSurface surface, int width, int height) : IDisposable
     {
-        public SKImage Image = image;
+        private SKImage? _image;
+        public SKSurface Surface { get; } = surface;
+        public long Bytes { get; } = (long)width * height * 4;
+        public SKImage Image => _image ??= Surface.Snapshot();
+        public void BeginUpdate()
+        {
+            // Release our snapshot before touching the surface. Skia can then update its existing
+            // software pixels instead of copying the entire page on every small edit.
+            _image?.Dispose();
+            _image = null;
+            Surface.Canvas.ResetMatrix();
+        }
+        public void Dispose() { _image?.Dispose(); Surface.Dispose(); }
+    }
+    private sealed class Entry(Raster raster, long bytes)
+    {
+        public Raster Raster = raster;
         public long Bytes = bytes;
         public long LastUse;
         public SceneBounds? Dirty;
@@ -45,32 +61,30 @@ public sealed class ScreenSceneCache : IDisposable
         ContentBounds = bounds;
     }
 
-    internal SKImage GetOrCreate(Key key, Func<SKImage> create, Func<SKImage, SceneBounds, SKImage> repaint)
+    internal SKImage GetOrCreate(Key key, Func<Raster> create, Action<Raster, SceneBounds> repaint)
     {
         if (_images.TryGetValue(key, out var cached))
         {
             cached.LastUse = ++_clock;
             if (cached.Dirty is { } dirty)
             {
-                var old = cached.Image;
-                cached.Image = repaint(old, dirty);
-                if (!ReferenceEquals(old, cached.Image)) old.Dispose();
+                repaint(cached.Raster, dirty);
                 cached.Dirty = null;
             }
-            return cached.Image;
+            return cached.Raster.Image;
         }
-        var image = create();
-        var bytes = (long)image.Width * image.Height * 4;
+        var raster = create();
+        var bytes = raster.Bytes;
         while (_images.Count > 0 && CachedBytes + bytes > MaxBytes)
         {
             var oldest = _images.MinBy(p => p.Value.LastUse);
             _images.Remove(oldest.Key);
             CachedBytes -= oldest.Value.Bytes;
-            oldest.Value.Image.Dispose();
+            oldest.Value.Raster.Dispose();
         }
-        _images.Add(key, new(image, bytes) { LastUse = ++_clock });
+        _images.Add(key, new(raster, bytes) { LastUse = ++_clock });
         CachedBytes += bytes;
-        return image;
+        return raster.Image;
     }
 
     private static bool Equivalent(ScenePrimitive before, ScenePrimitive after)
@@ -90,7 +104,7 @@ public sealed class ScreenSceneCache : IDisposable
 
     public void Clear()
     {
-        foreach (var image in _images.Values) image.Image.Dispose();
+        foreach (var image in _images.Values) image.Raster.Dispose();
         _images.Clear();
         _scene = null;
         CachedBytes = 0;

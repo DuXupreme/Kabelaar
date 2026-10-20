@@ -10,6 +10,77 @@ namespace Kabelaar.Rendering.Tests;
 public sealed class RenderingTests
 {
     [Fact]
+    public void ComponentCacheReusesUnchangedConnectorWhileMovedPinsAndWiresFollowTheirSource()
+    {
+        var project = DemoFactory.Create(); var sheet = project.Sheets[0]; var view = sheet.Views[0];
+        var left = project.Assembly.Connectors[0]; var right = project.Assembly.Connectors[1];
+        ScenePath Symbol(DrawingScene scene, string id) => scene.Primitives.OfType<ScenePath>().First(p => p.EntityId == id && p.Category == "connector-symbol");
+        var first = SceneBuilder.Build(project, sheet);
+        var same = SceneBuilder.Build(project, sheet);
+        Assert.Same(Symbol(first, left.Id), Symbol(same, left.Id));
+        var before = Symbol(first, left.Id).Points.ToArray();
+        HarnessOperations.MoveComponent(project, view, view.Components[0], view.Components[0].Position + new Point2(7, 4)).Execute();
+        var moved = SceneBuilder.Build(project, sheet);
+        Assert.NotSame(Symbol(first, left.Id), Symbol(moved, left.Id));
+        Assert.Same(Symbol(first, right.Id), Symbol(moved, right.Id));
+        Assert.Equal(before, Symbol(first, left.Id).Points);
+        var wire = project.Assembly.Conductors[0];
+        var line = moved.Primitives.OfType<ScenePath>().First(p => p.EntityId == wire.Id && p.Category == "twisted-wire");
+        Assert.Equal(view.Origin + Geometry.EndpointPosition(project, view, wire.From)!.Value, line.Points[0]);
+    }
+
+    [Fact]
+    public void ComponentCacheDetectsInPlacePartAndCavityEditsButSealOnlyChangesDoNotChangeGraphics()
+    {
+        var project = DemoFactory.Create(); var sheet = project.Sheets[0]; var view = sheet.Views[0];
+        var connector = project.Assembly.Connectors[0]; var other = project.Assembly.Connectors[1];
+        var part = project.Parts.Single(p => p.Id == connector.PartId);
+        ScenePath Symbol(DrawingScene scene, string id) => scene.Primitives.OfType<ScenePath>().First(p => p.EntityId == id && p.Category == "connector-symbol");
+        var first = SceneBuilder.Build(project, sheet);
+        connector.Cavities[0].SealPartId = "another-seal";
+        var seal = SceneBuilder.Build(project, sheet);
+        Assert.Same(Symbol(first, connector.Id), Symbol(seal, connector.Id));
+        connector.Cavities[0].Label = "NEW-PIN"; connector.Cavities[0].State = CavityState.Plugged;
+        var cavity = SceneBuilder.Build(project, sheet);
+        Assert.Contains(cavity.Primitives.OfType<SceneText>(), p => p.EntityId == connector.Id && p.Category == "pin-label" && p.Text == "NEW-PIN");
+        Assert.Same(Symbol(first, other.Id), Symbol(cavity, other.Id));
+        var oldPoint = part.Pins[0].Position;
+        part.Pins[0].Position += new Point2(3, 2);
+        part.Symbol[0].Points[0] += new Point2(-2, -2);
+        part.PartNumber = "CHANGED-PART";
+        var changed = SceneBuilder.Build(project, sheet);
+        Assert.NotSame(Symbol(cavity, other.Id), Symbol(changed, other.Id)); // Shared part update reaches both placements.
+        Assert.Contains(changed.Primitives.OfType<SceneText>(), p => p.EntityId == other.Id && p.Text == "CHANGED-PART");
+        var expected = view.Origin + Geometry.Transform(part.Pins[0].Position, view.Components[0].RotationDegrees, view.Components[0].Position);
+        Assert.Contains(changed.Primitives.OfType<SceneEllipse>(), p => p.EntityId == connector.Id && p.Category == "pin" && p.Center == expected && p.Fill == "#6C7A86");
+        var oldExpected = view.Origin + Geometry.Transform(oldPoint, view.Components[0].RotationDegrees, view.Components[0].Position);
+        Assert.Contains(first.Primitives.OfType<SceneEllipse>(), p => p.EntityId == connector.Id && p.Category == "pin" && p.Center == oldExpected);
+    }
+
+    [Fact]
+    public void RepeatedRasterPatchesPreserveUnchangedPixelsAndReleaseSnapshots()
+    {
+        using var cache = new ScreenSceneCache();
+        using var output = SKSurface.Create(new SKImageInfo(200, 200));
+        var stable = new SceneEllipse("stable", "test", new(70, 70), 6, 6, "#FF0000", 0, "#FF0000");
+        for (var i = 0; i < 20; i++)
+        {
+            var x = i % 2 == 0 ? 20 : 40;
+            var scene = new DrawingScene("sheet", 90, 90, false,
+                [stable, new SceneEllipse("moving", "test", new(x, 20), 5, 5, "#0000FF", 0, "#0000FF")]);
+            output.Canvas.ResetMatrix(); output.Canvas.Clear(SKColors.White); output.Canvas.Scale(2);
+            SkiaSceneRenderer.RenderScreen(output.Canvas, scene, new(0, 0, 90, 90), cache);
+            using var image = output.Snapshot();
+            using var bitmap = SKBitmap.FromImage(image);
+            Assert.Equal(SKColors.Red, bitmap.GetPixel(140, 140));
+            Assert.Equal(SKColors.Blue, bitmap.GetPixel(x * 2, 40));
+            Assert.Equal(SKColors.White, bitmap.GetPixel((x == 20 ? 40 : 20) * 2, 40));
+            Assert.Equal(1, cache.ImageCount);
+            Assert.InRange(cache.CachedBytes, 1, 64L * 1024 * 1024);
+        }
+    }
+
+    [Fact]
     public void SceneContainsEverySupportedDrawingCategory()
     {
         var project = CompleteFixture();

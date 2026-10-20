@@ -36,7 +36,6 @@ public partial class MainWindow : Window
     private string _treeSignature = "", _librarySignature = "";
     private readonly Dictionary<string, double> _refreshTimings = [];
     private WireDisplay[] _wireRows = [];
-    private string _bomSignature = "";
     private bool _propertiesRefreshQueued;
     private PartDefinition? SelectedPart => LibraryList.SelectedItem as PartDefinition;
     private string? SelectedId => Canvas.Selection.FirstOrDefault();
@@ -49,6 +48,11 @@ public partial class MainWindow : Window
         MinHeight = Math.Min(MinHeight, SystemParameters.WorkArea.Height);
         Width = Math.Min(Width, SystemParameters.WorkArea.Width);
         Height = Math.Min(Height, SystemParameters.WorkArea.Height);
+        // A deferred refresh must not allow a stale property button to run. Blocking
+        // input at the panel avoids toggling IsEnabled on hundreds of cavity editors,
+        // which otherwise invalidates their styles and delays the changed drawing.
+        PropertiesPanel.PreviewMouseDown += (_, e) => { if (_propertiesRefreshQueued) e.Handled = true; };
+        PropertiesPanel.PreviewKeyDown += (_, e) => { if (_propertiesRefreshQueued) e.Handled = true; };
         _history.Changed += (_, _) => { if (!_refreshing) Refresh(deferValidation: true); };
         _validationTimer.Tick += (_, _) => { _validationTimer.Stop(); if (_busy is null) RefreshValidation(); };
         Canvas.SelectionChanged += SelectionChanged;
@@ -126,20 +130,7 @@ public partial class MainWindow : Window
             RefreshTree();
             RefreshLibrary();
             Measure("treeLibrary");
-            var wireReports = HarnessReports.Wires(_project);
-            if (_wireRows.Length != wireReports.Count || _wireRows.Where((r, i) => r.Id != wireReports[i].Id).Any())
-            {
-                _wireRows = wireReports.Select(x => new WireDisplay(x)).ToArray();
-                WireGrid.ItemsSource = _wireRows;
-            }
-            else for (var i = 0; i < _wireRows.Length; i++) _wireRows[i].Update(wireReports[i]);
-            var bom = HarnessReports.Bom(_project).Select(x => new
-            {
-                x.PartNumber, x.Description, Quantity = x.Quantity.ToString("0.######"), x.Unit,
-                Supplier = _project.Parts.Find(p => p.Id == x.PartId)?.Supplier ?? ""
-            }).ToArray();
-            var bomSignature = System.Text.Json.JsonSerializer.Serialize(bom);
-            if (bomSignature != _bomSignature) { _bomSignature = bomSignature; BomGrid.ItemsSource = bom; }
+            RefreshReports();
             Measure("reports");
             if (deferValidation)
             {
@@ -152,7 +143,7 @@ public partial class MainWindow : Window
             Canvas.SetScene(SceneBuilder.Build(_project, _sheet));
             Measure("scene");
             if (deferValidation) QueuePropertiesRefresh();
-            else { ShowProperties(); PropertiesPanel.IsEnabled = true; }
+            else ShowProperties();
             Measure("properties");
         }
         finally { _refreshing = false; }
@@ -161,14 +152,12 @@ public partial class MainWindow : Window
     {
         // Present the changed drawing first. Reflowing text editors can otherwise hold up
         // that frame; a background dispatcher turn immediately refreshes the property pane.
-        PropertiesPanel.IsEnabled = false;
         if (_propertiesRefreshQueued) return;
         _propertiesRefreshQueued = true;
         Dispatcher.BeginInvoke(() =>
         {
-            _propertiesRefreshQueued = false;
-            ShowProperties();
-            PropertiesPanel.IsEnabled = true;
+            try { ShowProperties(); }
+            finally { _propertiesRefreshQueued = false; }
         }, DispatcherPriority.Background);
     }
     private void RefreshValidation()
@@ -342,7 +331,16 @@ public partial class MainWindow : Window
         public void Update(WireRow next)
         {
             if (_row == next) return;
-            _row = next; PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(null));
+            var previous = _row; _row = next;
+            void Changed(string name) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+            if (previous.Name != next.Name) Changed(nameof(Name));
+            if (previous.From != next.From) Changed(nameof(From));
+            if (previous.To != next.To) Changed(nameof(To));
+            if (previous.Color != next.Color) Changed(nameof(Color));
+            if (!previous.CrossSectionMm2.Equals(next.CrossSectionMm2)) Changed(nameof(CrossSection));
+            if (!previous.RouteLengthMm.Equals(next.RouteLengthMm)) Changed(nameof(RouteLength));
+            if (!previous.CutLengthMm.Equals(next.CutLengthMm)) Changed(nameof(CutLength));
+            if (previous.Signal != next.Signal) Changed(nameof(Signal));
         }
         public string Id => _row.Id;
         public string Name => _row.Name;

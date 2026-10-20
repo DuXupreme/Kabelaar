@@ -26,6 +26,18 @@ public partial class MainWindow
             ReplaceProject(DemoFactory.Create(), null, null);
             Stage("Voorbeeld geopend");
             Check(!ProductionValidator.Validate(_project).Any(i => i.Severity == Severity.Error), "Synthetisch voorbeeld is productiecontroleerbaar");
+            var firstPlacement = _view.Components[0];
+            Canvas.Select(firstPlacement.EntityId);
+            var pendingButton = PropertiesPanel.Children.OfType<System.Windows.Controls.StackPanel>()
+                .SelectMany(p => p.Children.OfType<System.Windows.Controls.Button>())
+                .Single(b => b.Content as string == "Connector toepassen");
+            _history.Execute(HarnessOperations.MoveComponent(_project, _view, firstPlacement, firstPlacement.Position + new Point2(1, 0)));
+            var pendingState = _history.StateToken;
+            // A button pressed before undo/drag may deliver Click after the model changed.
+            pendingButton.RaiseEvent(new System.Windows.RoutedEventArgs(System.Windows.Controls.Button.ClickEvent));
+            Check(_history.StateToken == pendingState, "Een oude propertyknop voert tijdens uitgestelde verversing geen bewerking uit");
+            _history.Undo();
+            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
             var wire = _project.Assembly.Conductors[0];
             Canvas.Select(wire.Id);
             Check(WireGrid.SelectedItem is WireDisplay row && row.Id == wire.Id, "Tekeningselectie koppelt naar aansluitlijst");
@@ -144,7 +156,11 @@ public partial class MainWindow
                     p95Milliseconds = editP95, targetMilliseconds = 100, passes = editP95 <= 100 },
                 editDetails,
                 lastRefreshMilliseconds = new Dictionary<string, double>(_refreshTimings),
-                reference = new { os = Environment.OSVersion.ToString(), processors = Environment.ProcessorCount, memoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes },
+                reference = new { os = Environment.OSVersion.ToString(), processors = Environment.ProcessorCount,
+                    memoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,
+                    canvasWidthDip = Canvas.ActualWidth, canvasHeightDip = Canvas.ActualHeight,
+                    dpiScale = System.Windows.Media.VisualTreeHelper.GetDpi(Canvas).DpiScaleX,
+                    activatesWindow = ShowActivated },
                 humanAcceptance = "Tweede pc, schermschaling 100–200%, echte productietekening en gebruikersbeoordeling nog afzonderlijk uitvoeren." };
             await File.WriteAllTextAsync(Path.Combine(output, "acceptance-report.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
             await File.WriteAllTextAsync(Path.Combine(output, "smoke-result.json"), JsonSerializer.Serialize(new { success = p95 <= 33 && editP95 <= 100, report = "acceptance-report.json" }));

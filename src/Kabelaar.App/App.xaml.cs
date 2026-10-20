@@ -6,6 +6,7 @@ namespace Kabelaar.App;
 
 public partial class App : Application
 {
+    private bool _backgroundAcceptance;
     public static string DataDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kabelaar.UserData", "Data");
     protected override void OnStartup(StartupEventArgs e)
@@ -14,13 +15,48 @@ public partial class App : Application
         Directory.CreateDirectory(DataDirectory);
         DispatcherUnhandledException += OnUnexpectedException;
         TaskScheduler.UnobservedTaskException += (_, args) => { Log(args.Exception); args.SetObserved(); };
+        if (e.Args.Contains("--acceptance-hold"))
+        {
+            _backgroundAcceptance = true;
+            ShutdownMode = ShutdownMode.OnExplicitShutdown;
+            _ = HoldAcceptanceProcessAsync(e.Args);
+            return;
+        }
         var window = new MainWindow();
         MainWindow = window;
+        var launchOutput = Environment.GetEnvironmentVariable("KABELAAR_ACCEPTANCE_LAUNCH_OUTPUT");
+        var launchProbe = !string.IsNullOrWhiteSpace(launchOutput) &&
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("KABELAAR_ACCEPTANCE_NONCE"));
+        var backgroundTest = e.Args.Contains("--smoke-test") || e.Args.Contains("--installed-acceptance") || launchProbe;
+        _backgroundAcceptance = backgroundTest;
+        if (backgroundTest || e.Args.Contains("--no-activate")) window.ShowActivated = false;
+        if (backgroundTest) window.ShowInTaskbar = false;
         if (e.Args.Contains("--smoke-test"))
         {
             window.Loaded += async (_, _) =>
             {
                 try { await window.RunSmokeTestAsync(e.Args); Shutdown(0); }
+                catch (Exception ex) { Log(ex); Shutdown(2); }
+            };
+        }
+        else if (e.Args.Contains("--installed-acceptance"))
+        {
+            window.Loaded += async (_, _) =>
+            {
+                try { await window.RunInstalledAcceptanceAsync(e.Args); Shutdown(0); }
+                catch (Exception ex) { Log(ex); Shutdown(2); }
+            };
+        }
+        else if (launchProbe)
+        {
+            window.Loaded += async (_, _) =>
+            {
+                try
+                {
+                    await window.RunLaunchAcceptanceAsync(e.Args, launchOutput!,
+                        Environment.GetEnvironmentVariable("KABELAAR_ACCEPTANCE_NONCE")!);
+                    Shutdown(0);
+                }
                 catch (Exception ex) { Log(ex); Shutdown(2); }
             };
         }
@@ -34,6 +70,7 @@ public partial class App : Application
     private void OnUnexpectedException(object sender, DispatcherUnhandledExceptionEventArgs e)
     {
         Log(e.Exception);
+        if (_backgroundAcceptance) { e.Handled = true; Shutdown(2); return; }
         MessageBox.Show("De bewerking kon niet worden voltooid. Sla je werk op onder een nieuwe naam.\n\n" +
                         e.Exception.Message, "Kabelaar", MessageBoxButton.OK, MessageBoxImage.Error);
         e.Handled = true;

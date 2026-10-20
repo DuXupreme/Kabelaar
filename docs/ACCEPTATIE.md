@@ -25,6 +25,33 @@ tussen gebaren krijgt de normale Windows-eventloop tijd voor eigenschappen.
 De controlebevindingen worden na 200 ms zonder nieuwe bewerking vernieuwd.
 Productie-export voert altijd een nieuwe controle uit op zijn eigen snapshot.
 De ruwe tijden, referentie-pc en p95 staan in `acceptance-report.json`.
+De werkruimte ververst alleen gewijzigde rapportcellen en hergebruikt ongewijzigde
+connectorgeometrie. Lengtewijzigingen blijven in de rapporten zichtbaar; de
+regressietests vergelijken deze met een volledige nieuwe berekening. Tijdens een
+uitgestelde verversing kunnen oude knoppen in het eigenschappenpaneel geen
+achterhaalde bewerking uitvoeren.
+
+De ketentest activeert zijn venster niet en neemt geen muis- of toetsenbordinvoer
+over. De werkelijke WPF-rendering blijft actief. Het rapport bewaart ook de
+canvasafmetingen en schermschaling, zodat metingen vergelijkbaar zijn.
+
+## Geautomatiseerde installatieproef
+
+`scripts/Test-KabelaarInstallation.ps1` gebruikt uitsluitend synthetische
+documenten en de echte lokaal geïnstalleerde app. De proef controleert de
+Windows-snelkoppelingen en bestandsassociatie door ze daadwerkelijk te starten.
+De opslagbeslissingen bij updates worden vanuit de test aangereikt; opslaan,
+procesvergrendeling, downloaden uit de lokale releasemap en toepassen/herstarten
+gebruiken de productiecode.
+
+De proef onderscheidt annuleren, eerst opslaan, een ander geopend appproces en
+een proces dat tijdens opslaan opent. De herstelproef wacht op de gewone
+20-seconden-autosave, beëindigt uitsluitend haar eigen testproces en controleert
+het herstelarchief na de upgrade. Gebruikersbestanden blijven buiten de
+installatiemap en worden vóór en na de upgrade vergeleken.
+
+De resultaten zijn technische installatie- en upgradetests op deze pc.
+Ze vervangen de onderstaande visuele beoordeling en tweede-pc-proef niet.
 
 De automatische suites omvatten modelregels, routevertakkingen, materiaaltelling,
 opslagfouten/conflicten, beschadigde herstelbestanden, catalogusbehoud, echte

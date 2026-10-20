@@ -72,38 +72,8 @@ public partial class MainWindow
                 Status("Update voorbereid. Herstart uitgesteld.");
                 return;
             }
-            if (!CanRestartForUpdate()) return;
-            if (!await ConfirmLeaveAsync())
-            {
-                Status("Update voorbereid. Je werk blijft open; er is geen herstart uitgevoerd.");
-                return;
-            }
-            if (!CanRestartForUpdate()) return;
-            _closing = true;
-            _autosave.Stop();
-            _lease?.Dispose();
-            _lease = null;
-            try
-            {
-                updates.ApplyUpdatesAndRestart(candidate.TargetFullRelease, _path is null ? [] : [_path]);
-            }
-            catch
-            {
-                _closing = false;
-                _autosave.Start();
-                if (_path is not null)
-                {
-                    _lease = ProjectLease.TryAcquire(_path);
-                    if (_lease is null)
-                    {
-                        // An external editor obtained the lease meanwhile. Keep this document as an unsaved copy.
-                        _path = null;
-                        _fingerprint = null;
-                        _history.Execute(new DelegateCommand("Project behouden na mislukte update", () => { }, () => { }));
-                    }
-                }
-                throw;
-            }
+            await RestartForUpdateAsync(() =>
+                updates.ApplyUpdatesAndRestart(candidate.TargetFullRelease, _path is null ? [] : [_path]));
         }
         catch (Exception error)
         {
@@ -112,7 +82,42 @@ public partial class MainWindow
                 "Lokale update mislukt", MessageBoxButton.OK, MessageBoxImage.Error);
         }
     }
-    private bool CanRestartForUpdate()
+    // The same save/guard/lease sequence is exercised by installed acceptance.
+    // Only the confirmation answer and final apply action have explicit test seams.
+    private async Task<bool> RestartForUpdateAsync(Action apply, Func<Task<bool>>? confirmLeave = null,
+        Action<string>? showBlock = null)
+    {
+        if (!CanRestartForUpdate(showBlock)) return false;
+        if (!await (confirmLeave?.Invoke() ?? ConfirmLeaveAsync()))
+        {
+            Status("Update voorbereid. Je werk blijft open; er is geen herstart uitgevoerd.");
+            return false;
+        }
+        if (!CanRestartForUpdate(showBlock)) return false;
+        var autosaveEnabled = _autosave.IsEnabled;
+        var validationEnabled = _validationTimer.IsEnabled;
+        _closing = true;
+        _autosave.Stop(); _validationTimer.Stop();
+        _lease?.Dispose(); _lease = null;
+        try { apply(); return true; }
+        catch
+        {
+            _closing = false;
+            if (autosaveEnabled) _autosave.Start();
+            if (validationEnabled) _validationTimer.Start();
+            if (_path is not null)
+            {
+                _lease = ProjectLease.TryAcquire(_path);
+                if (_lease is null)
+                {
+                    _path = null; _fingerprint = null;
+                    _history.Execute(new DelegateCommand("Project behouden na mislukte update", () => { }, () => { }));
+                }
+            }
+            throw;
+        }
+    }
+    private bool CanRestartForUpdate(Action<string>? showBlock = null)
     {
         var root = Velopack.Locators.VelopackLocator.Current.RootAppDir;
         if (string.IsNullOrWhiteSpace(root)) return false;
@@ -135,9 +140,9 @@ public partial class MainWindow
             }
         }
         if (!otherWindow) return true;
-        MessageBox.Show(this,
-            "Bewaar je werk en sluit eerst de andere vensters van deze Kabelaar-installatie. Start de update daarna vanuit dit venster.",
-            "Andere documenten zijn geopend", MessageBoxButton.OK, MessageBoxImage.Information);
+        const string message = "Bewaar je werk en sluit eerst de andere vensters van deze Kabelaar-installatie. Start de update daarna vanuit dit venster.";
+        if (showBlock is not null) showBlock(message);
+        else MessageBox.Show(this, message, "Andere documenten zijn geopend", MessageBoxButton.OK, MessageBoxImage.Information);
         return false;
     }
 }

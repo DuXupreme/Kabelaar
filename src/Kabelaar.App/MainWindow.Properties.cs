@@ -23,7 +23,7 @@ public partial class MainWindow
             if (_propertiesState?.SequenceEqual(state) == true) return;
             _propertiesState = state; _refreshPlacementProperties = null;
             PropertiesPanel.Children.Clear();
-            var projectForm = new PropertyForm();
+            var projectForm = new PropertyForm { CanApply = () => !_propertiesRefreshQueued };
             PropertiesPanel.Children.Add(projectForm.Panel);
             PropertiesHeading.Text = "PROJECT";
             BuildProjectProperties(projectForm);
@@ -42,7 +42,7 @@ public partial class MainWindow
         }
         _propertiesState = connectorState; _refreshPlacementProperties = null;
         PropertiesPanel.Children.Clear();
-        var form = new PropertyForm();
+        var form = new PropertyForm { CanApply = () => !_propertiesRefreshQueued };
         PropertiesPanel.Children.Add(form.Panel);
         var wire = _project.Assembly.Conductors.Find(w => w.Id == id);
         var splice = _project.Assembly.Splices.Find(s => s.Id == id || s.Id == placement?.EntityId);

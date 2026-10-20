@@ -49,6 +49,7 @@ internal static class EditData
 
 internal sealed class PropertyForm
 {
+    public Func<bool>? CanApply { get; init; }
     public StackPanel Panel { get; } = new();
     public TextBox Text(string label, string value, bool multiline = false)
     {
@@ -89,6 +90,7 @@ internal sealed class PropertyForm
         if (primary) button.SetResourceReference(FrameworkElement.StyleProperty, "PrimaryButton");
         button.Click += (_, _) =>
         {
+            if (CanApply?.Invoke() == false) return;
             try { action(); }
             catch (Exception ex) { MessageBox.Show(ex.Message, "Bewerking niet toegepast", MessageBoxButton.OK, MessageBoxImage.Warning); }
         };
