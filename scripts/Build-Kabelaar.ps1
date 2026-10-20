@@ -4,7 +4,8 @@ param(
     [string]$ArtifactDirectory = '',
     [switch]$BuildNative,
     [switch]$SkipTests,
-    [switch]$SkipSmokeTest
+    [switch]$SkipSmokeTest,
+    [switch]$InteractiveSmoke
 )
 $ErrorActionPreference = 'Stop'
 $repository = [IO.Path]::GetFullPath("$PSScriptRoot\..")
@@ -121,11 +122,22 @@ try {
     }
     if (!$SkipSmokeTest) {
         $smokeDirectory = Join-Path $ArtifactDirectory 'smoke'
-        $process = Start-Process -FilePath "$publishDirectory\Kabelaar.exe" -ArgumentList @('--smoke-test','--output',"`"$smokeDirectory`"") -WindowStyle Hidden -PassThru
-        if (!$process.WaitForExit(180000)) { $process.Kill(); throw 'Published app smoke test timed out.' }
+        $smokeArguments = @('--smoke-test','--output',"`"$smokeDirectory`"")
+        $windowStyle = 'Hidden'
+        $smokeTimeout = 180000
+        if ($InteractiveSmoke) {
+            $smokeArguments += '--interactive-smoke'
+            $windowStyle = 'Normal'
+            $smokeTimeout = 115000
+        }
+        $smokeWatch = [Diagnostics.Stopwatch]::StartNew()
+        $process = Start-Process -FilePath "$publishDirectory\Kabelaar.exe" -ArgumentList $smokeArguments -WindowStyle $windowStyle -PassThru
+        $remaining = [int][Math]::Max(0, $smokeTimeout - $smokeWatch.ElapsedMilliseconds)
+        if (!$process.WaitForExit($remaining)) { $process.Kill($true); throw 'Published app smoke test timed out.' }
         if ($process.ExitCode -ne 0) { throw "Published app smoke test failed: exit $($process.ExitCode)." }
         $smokeFile = Join-Path $smokeDirectory 'smoke-result.json'
-        if (!(Test-Path -LiteralPath $smokeFile) -or !(Get-Content -LiteralPath $smokeFile -Raw | ConvertFrom-Json).success) {
+        $smokeResult = if (Test-Path -LiteralPath $smokeFile) { Get-Content -LiteralPath $smokeFile -Raw | ConvertFrom-Json } else { $null }
+        if (!$smokeResult.success -or $smokeResult.scope -ne 'full' -or $smokeResult.performanceMeasured -ne $true) {
             throw 'Published app smoke acceptance report is missing or failed.'
         }
     }

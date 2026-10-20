@@ -19,6 +19,18 @@ application's smoke/performance acceptance checks. It records the commit,
 dependency licenses, test evidence and hashes of all published files. Development
 builds may use `-SkipTests` or `-SkipSmokeTest`; these cannot be packaged.
 
+`-InteractiveSmoke` runs the same full acceptance test in an activated, visible
+taskbar window, with a 115-second timeout. It adds `--interactive-smoke` to the
+application's `--smoke-test`; the default remains an unactivated background test.
+Neither mode generates keyboard or mouse input, and both retain the same
+fixtures, measurements and performance limits.
+
+`Kabelaar.exe --smoke-test --functional-smoke --output <folder>` runs only the
+16 functional checks through embedded STEP reopening. Its reports explicitly
+record `scope: functional-only` and `performanceMeasured: false`. Use this to
+check installed/portable copies whose runtime hashes match a release that
+already passed the full benchmark. It cannot satisfy the build's full smoke gate.
+
 `Package-Kabelaar` requires a clean working tree at the exact tested commit, a
 passing smoke report, unchanged test evidence and unchanged published files.
 It creates the local Velopack installer, portable ZIP and update feed. It does
@@ -75,7 +87,7 @@ Recovery cleanup removes only this run's synthetic recovery entry. A failed
 run retains its evidence and may leave that clearly identified test data for
 inspection.
 
-Acceptance windows use `ShowActivated=false` and stay out of the taskbar.
+Installed acceptance windows use `ShowActivated=false` and stay out of the taskbar.
 The normal `--no-activate` argument also prevents activation for ordinary
 launches. No mouse or keyboard input is generated. Confirmation answers are
 scripted, while saving, process checks, updating and restarting use production

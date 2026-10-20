@@ -28,9 +28,10 @@ public partial class App : Application
         var launchProbe = !string.IsNullOrWhiteSpace(launchOutput) &&
             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("KABELAAR_ACCEPTANCE_NONCE"));
         var backgroundTest = e.Args.Contains("--smoke-test") || e.Args.Contains("--installed-acceptance") || launchProbe;
+        var interactiveSmoke = e.Args.Contains("--smoke-test") && e.Args.Contains("--interactive-smoke");
         _backgroundAcceptance = backgroundTest;
-        if (backgroundTest || e.Args.Contains("--no-activate")) window.ShowActivated = false;
-        if (backgroundTest) window.ShowInTaskbar = false;
+        if ((backgroundTest && !interactiveSmoke) || e.Args.Contains("--no-activate")) window.ShowActivated = false;
+        if (backgroundTest && !interactiveSmoke) window.ShowInTaskbar = false;
         if (e.Args.Contains("--smoke-test"))
         {
             window.Loaded += async (_, _) =>

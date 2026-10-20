@@ -109,6 +109,23 @@ public partial class MainWindow
             var embeddedPreview = await ImportEmbeddedStepPreviewAsync(reopenedAsset, CancellationToken.None);
             Check(embeddedPreview.Views.Count == 6 && embeddedPreview.Mesh.Triangles.Count == imported.Mesh.Triangles.Count,
                 "STEP-preview heropent uit projectasset zonder oorspronkelijk bronpad");
+            if (args.Contains("--functional-smoke"))
+            {
+                var functionalReport = new
+                {
+                    utc = DateTimeOffset.UtcNow, version = typeof(MainWindow).Assembly.GetName().Version?.ToString(),
+                    scope = "functional-only", performanceMeasured = false, checks,
+                    reference = new { os = Environment.OSVersion.ToString(), processors = Environment.ProcessorCount,
+                        memoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes, activatesWindow = ShowActivated },
+                    humanAcceptance = "Functionele installatiecontrole; geen prestatiemeting of visuele praktijkacceptatie."
+                };
+                await File.WriteAllTextAsync(Path.Combine(output, "acceptance-report.json"),
+                    JsonSerializer.Serialize(functionalReport, new JsonSerializerOptions { WriteIndented = true }));
+                await File.WriteAllTextAsync(Path.Combine(output, "smoke-result.json"),
+                    JsonSerializer.Serialize(new { success = true, scope = "functional-only", performanceMeasured = false, report = "acceptance-report.json" }));
+                ReplaceProject(DemoFactory.Create(), null, null); _closing = true;
+                return;
+            }
             ReplaceProject(DemoFactory.CreateAcceptancePerformance(), null, null);
             Check(_project.Assembly.Connectors.Count == 100 && _project.Assembly.Conductors.Count == 1000, "Vast prestatieblad bevat 100 connectoren en 1000 aders");
             Canvas.Fit(); await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
@@ -151,6 +168,7 @@ public partial class MainWindow
             var p95 = frames.Length > 0 ? frames[(int)Math.Ceiling(frames.Length * .95) - 1] : double.PositiveInfinity;
             var editP95 = editing.OrderBy(x => x).ElementAt((int)Math.Ceiling(editing.Count * .95) - 1);
             var report = new { utc = DateTimeOffset.UtcNow, version = typeof(MainWindow).Assembly.GetName().Version?.ToString(),
+                scope = "full", performanceMeasured = true,
                 checks, rendering = new { frames = frames.Length, p95Milliseconds = p95, targetMilliseconds = 33, passes = p95 <= 33 },
                 editing = new { samples = editing.Count, warmupSamples = coldEditing.Count, coldMilliseconds = coldEditing,
                     p95Milliseconds = editP95, targetMilliseconds = 100, passes = editP95 <= 100 },
@@ -163,7 +181,8 @@ public partial class MainWindow
                     activatesWindow = ShowActivated },
                 humanAcceptance = "Tweede pc, schermschaling 100–200%, echte productietekening en gebruikersbeoordeling nog afzonderlijk uitvoeren." };
             await File.WriteAllTextAsync(Path.Combine(output, "acceptance-report.json"), JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
-            await File.WriteAllTextAsync(Path.Combine(output, "smoke-result.json"), JsonSerializer.Serialize(new { success = p95 <= 33 && editP95 <= 100, report = "acceptance-report.json" }));
+            await File.WriteAllTextAsync(Path.Combine(output, "smoke-result.json"), JsonSerializer.Serialize(new
+                { success = p95 <= 33 && editP95 <= 100, scope = "full", performanceMeasured = true, report = "acceptance-report.json" }));
             if (p95 > 33 || editP95 > 100) throw new InvalidOperationException($"Prestatiedoel nog niet bereikt: frame p95={p95:0.0} ms; bewerking p95={editP95:0.0} ms.");
             ReplaceProject(DemoFactory.Create(), null, null); _closing = true;
         }

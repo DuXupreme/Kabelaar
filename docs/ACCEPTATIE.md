@@ -31,9 +31,18 @@ regressietests vergelijken deze met een volledige nieuwe berekening. Tijdens een
 uitgestelde verversing kunnen oude knoppen in het eigenschappenpaneel geen
 achterhaalde bewerking uitvoeren.
 
-De ketentest activeert zijn venster niet en neemt geen muis- of toetsenbordinvoer
-over. De werkelijke WPF-rendering blijft actief. Het rapport bewaart ook de
-canvasafmetingen en schermschaling, zodat metingen vergelijkbaar zijn.
+Standaard activeert de ketentest zijn venster niet. Met `--interactive-smoke`
+naast `--smoke-test` verschijnt een actief venster in de taakbalk; de buildoptie
+`-InteractiveSmoke` gebruikt deze modus met maximaal 115 seconden.
+Beide modi gebruiken dezelfde meetlussen en drempels en genereren geen muis- of
+toetsenbordinvoer. Het rapport bewaart ook canvasafmetingen en schermschaling.
+
+Voor geïnstalleerde en portable kopieën kan `--functional-smoke` naast
+`--smoke-test` alleen de 16 functionele controles tot en met heropenen van de
+ingesloten STEP uitvoeren. Dit rapporteert expliciet `performanceMeasured: false`
+en `scope: functional-only`; het is geen prestatietest. De runtimehashes moeten
+overeenkomen met de exacte release die de volledige benchmark al heeft doorstaan.
+De volledige build accepteert deze beperkte modus niet als prestatiebewijs.
 
 ## Geautomatiseerde installatieproef
 
