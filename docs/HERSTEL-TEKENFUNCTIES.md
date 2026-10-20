@@ -24,6 +24,14 @@ verborgen WPF-ketentest geslaagd. Bewijs onder `artifacts/restoration-093-prefli
 en `artifacts/restoration-093-smoke-dev2`. De definitieve releasebuild herhaalt
 deze controles op de vastgelegde commit; ontwikkelbewijs vervangt dat niet.
 
+De eerste definitieve pakketmeting overschreed de bewerkingsgrens bij wisselende
+pc-belasting. Daarom blijven verpakking en installatie geblokkeerd tot een
+volledige releasecontrole slaagt. De volgende optimalisatie indexeert betrokken
+routes per transactie, controleert gedeelde schaalmaten in één doorgang en
+vermijdt onnodige tekenallocaties. De bijbehorende 194 regressietests slagen;
+bewijs staat onder `artifacts/restoration-093-optimized-tests`. Per bewerking
+worden nu ook opdracht-, scène-, allocatie- en GC-metingen vastgelegd.
+
 ## Tweede lokale update: 0.9.4
 
 Pas starten nadat de eerste update is geïnstalleerd.

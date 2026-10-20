@@ -96,7 +96,8 @@ public static partial class SceneBuilder
                 primitives.Add(primitive with { ViewId = view.Id, LayerId = layer, Locked = primitive.Locked || Locked(layer), PlacementId = placementId });
             }
             var routePlacements = FirstById(view.Routes, r => r.BranchId);
-            var wirePresentations = FirstById(view.WirePresentations, p => p.ConductorId);
+            var wirePresentations = view.WirePresentations.Count == 0
+                ? null : FirstById(view.WirePresentations, p => p.ConductorId);
             var flattenedRoutes = routePlacements.ToDictionary(pair => pair.Key, pair =>
             {
                 var branch = branches.GetValueOrDefault(pair.Key); var route = pair.Value;
@@ -123,17 +124,16 @@ public static partial class SceneBuilder
                 && endpointPositions.TryGetValue((entity, endpoint.Kind == EndpointKind.Splice ? null : endpoint.CavityId), out var point) ? point : null;
             Checkpoint("endpoints");
             var wirePaths = new Dictionary<string, IReadOnlyList<Point2>>(conductors.Count);
-            var baselineWirePaths = new Dictionary<string, IReadOnlyList<Point2>>();
-            var individuallyShaped = new HashSet<string>();
+            Dictionary<string, IReadOnlyList<Point2>>? baselineWirePaths = null;
             foreach (var wire in conductors.Values)
             {
                 var start = EndpointPoint(wire.From); var end = EndpointPoint(wire.To);
                 var baseline = ResolveConductorPoints(wire, start, end, flattenedRoutes);
-                if (view.Mode == LayoutMode.Free && wirePresentations.TryGetValue(wire.Id, out var presentation) &&
-                    presentation.Routes.Any(r => wire.BranchIds.Contains(r.BranchId) && routePlacements.ContainsKey(r.BranchId)))
+                if (view.Mode == LayoutMode.Free && wirePresentations is not null &&
+                    wirePresentations.TryGetValue(wire.Id, out var presentation) &&
+                    HasRouteOverride(wire, presentation, routePlacements))
                 {
-                    individuallyShaped.Add(wire.Id);
-                    baselineWirePaths.Add(wire.Id, baseline);
+                    (baselineWirePaths ??= new()).Add(wire.Id, baseline);
                     wirePaths.Add(wire.Id, ResolveConductorPoints(wire, start, end,
                         OverrideRoutes(flattenedRoutes, presentation)));
                 }
@@ -143,11 +143,11 @@ public static partial class SceneBuilder
             foreach (var twist in project.Assembly.TwistGroups)
             {
                 var paths = twist.ConductorIds.Where(wirePaths.ContainsKey)
-                    .Select(id => baselineWirePaths.GetValueOrDefault(id) ?? wirePaths[id]).Where(p => p.Count >= 2).ToArray();
+                    .Select(id => baselineWirePaths?.GetValueOrDefault(id) ?? wirePaths[id]).Where(p => p.Count >= 2).ToArray();
                 if (paths.Length != twist.ConductorIds.Count || paths.Length < 2) continue;
                 for (var i = 0; i < twist.ConductorIds.Count; i++)
                     twistedPaths[twist.ConductorIds[i]] = TwistTogether(
-                        individuallyShaped.Contains(twist.ConductorIds[i])
+                        baselineWirePaths?.ContainsKey(twist.ConductorIds[i]) == true
                             ? Enumerable.Repeat(wirePaths[twist.ConductorIds[i]], paths.Length).ToArray() : paths, i,
                         style.TwistDisplayPitchMm > 0 ? style.TwistDisplayPitchMm : twist.PitchMm,
                         style.TwistAmplitudeMm, style.TwistDisplayMode);
@@ -234,11 +234,11 @@ public static partial class SceneBuilder
                     var twist = twistByWire.GetValueOrDefault(wire.Id);
                     if (twistedPaths.TryGetValue(wire.Id, out var twisted))
                         points = twisted;
-                    else if (!individuallyShaped.Contains(wire.Id) && wireOffsets.TryGetValue(wire.Id, out var offset))
+                    else if (baselineWirePaths?.ContainsKey(wire.Id) != true && wireOffsets.TryGetValue(wire.Id, out var offset))
                         points = Offset(points, offset);
-                    var label = labels?.Place(points, view.Origin, scale, WireLabel(wire.Name, wire.ColorCode, wire.CrossSectionMm2),
+                    var label = labels?.Place(points, view.Origin, scale, WireLabel(wireCache, wire.Id, wire.Name, wire.ColorCode, wire.CrossSectionMm2),
                         style.WireLabelFontSizeMm * scale) ?? (new Point2(), new Point2());
-                    var lineWidth = WireLineWidth(style, wire, wirePresentations.GetValueOrDefault(wire.Id));
+                    var lineWidth = WireLineWidth(style, wire, wirePresentations?.GetValueOrDefault(wire.Id));
                     var appearance = new WireAppearance(view.Id, view.Origin, scale, layer, placement?.Id, Locked(layer),
                         wire.Name, wire.ColorCode, wire.Color, wire.CrossSectionMm2, twist is not null,
                         wire.From.Kind == EndpointKind.Free, wire.To.Kind == EndpointKind.Free,

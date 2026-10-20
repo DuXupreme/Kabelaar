@@ -278,22 +278,26 @@ public sealed class HarnessCanvas : SKElement
         SkiaSceneRenderer.RenderScreen(c, _previewBackground ?? _scene, viewport, _previewBackground is null ? _screenCache : _previewCache, Selection);
         if (_previewBackground is not null) SkiaSceneRenderer.RenderPrimitives(c, _previewPrimitives, viewport);
         using var accent = new SKPaint { Color = SKColor.Parse("#087F8C"), StrokeWidth = (float)(1.5 / _zoom), IsAntialias = true, Style = SKPaintStyle.Stroke };
-        using var tangent = new SKPaint { Color = PreviewRejected ? SKColors.Red : SKColor.Parse("#D99B00"), StrokeWidth = (float)(1 / _zoom), IsAntialias = true, Style = SKPaintStyle.Stroke };
-        using var handleFill = new SKPaint { Color = PreviewRejected ? SKColors.OrangeRed : SKColor.Parse("#FFD12F"), IsAntialias = true, Style = SKPaintStyle.Fill };
-        foreach (var handle in PreviewHandles ?? GeometryHandles)
+        var handles = PreviewHandles ?? GeometryHandles;
+        if (handles.Count > 0 || (PreviewRejected && _previewPrimitives.Count > 0))
         {
-            if (handle.Kind != GeometryHandleKind.Knot)
+            using var tangent = new SKPaint { Color = PreviewRejected ? SKColors.Red : SKColor.Parse("#D99B00"), StrokeWidth = (float)(1 / _zoom), IsAntialias = true, Style = SKPaintStyle.Stroke };
+            using var handleFill = new SKPaint { Color = PreviewRejected ? SKColors.OrangeRed : SKColor.Parse("#FFD12F"), IsAntialias = true, Style = SKPaintStyle.Fill };
+            foreach (var handle in handles)
             {
-                c.DrawLine((float)handle.Origin.X, (float)handle.Origin.Y, (float)handle.Position.X, (float)handle.Position.Y, tangent);
-                c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(4 / _zoom), handleFill);
-                c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(4 / _zoom), tangent);
+                if (handle.Kind != GeometryHandleKind.Knot)
+                {
+                    c.DrawLine((float)handle.Origin.X, (float)handle.Origin.Y, (float)handle.Position.X, (float)handle.Position.Y, tangent);
+                    c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(4 / _zoom), handleFill);
+                    c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(4 / _zoom), tangent);
+                }
+                else c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(3 / _zoom), accent);
             }
-            else c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(3 / _zoom), accent);
-        }
-        if (PreviewRejected && _previewPrimitives.Count > 0)
-        {
-            var b = SceneBounds.Around(_previewPrimitives.SelectMany(p => new[] { new Point2(p.Bounds.Left, p.Bounds.Top), new Point2(p.Bounds.Right, p.Bounds.Bottom) }), 1);
-            c.DrawRect((float)b.X, (float)b.Y, (float)b.Width, (float)b.Height, tangent);
+            if (PreviewRejected && _previewPrimitives.Count > 0)
+            {
+                var b = SceneBounds.Around(_previewPrimitives.SelectMany(p => new[] { new Point2(p.Bounds.Left, p.Bounds.Top), new Point2(p.Bounds.Right, p.Bounds.Bottom) }), 1);
+                c.DrawRect((float)b.X, (float)b.Y, (float)b.Width, (float)b.Height, tangent);
+            }
         }
         foreach (var vertex in EditableVertices)
             c.DrawRect((float)(vertex.X - 3 / _zoom), (float)(vertex.Y - 3 / _zoom), (float)(6 / _zoom), (float)(6 / _zoom), accent);

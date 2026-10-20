@@ -49,6 +49,17 @@ public static partial class SceneBuilder
         IReadOnlyDictionary<string, IReadOnlyList<Point2>> baseline, WirePresentation presentation) =>
         presentation.Routes.Count == 0 ? baseline : new PresentedRoutes(baseline, presentation);
 
+    private static bool HasRouteOverride(Conductor wire, WirePresentation presentation,
+        IReadOnlyDictionary<string, PlacedRoute> routePlacements)
+    {
+        // Keep the membership check out of Build's per-wire loop: a capturing Any lambda
+        // allocates a closure even on scaled views where no individual geometry is used.
+        foreach (var route in presentation.Routes)
+            if (wire.BranchIds.Contains(route.BranchId) && routePlacements.ContainsKey(route.BranchId))
+                return true;
+        return false;
+    }
+
     // A wire normally owns only one or two overrides. Do not copy the whole view's route dictionary
     // once per edited wire: the performance fixture contains a thousand independent physical routes.
     private sealed class PresentedRoutes(

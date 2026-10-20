@@ -152,8 +152,13 @@ public partial class MainWindow
             for (var i = 0; i < 110; i++)
             {
                 var beforeFrame = Canvas.FrameMilliseconds.Count;
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                var collectionsBefore = Enumerable.Range(0, 3).Select(GC.CollectionCount).ToArray();
                 var watch = Stopwatch.StartNew();
-                _history.Execute(HarnessOperations.MoveComponent(_project, _view, placement, placement.Position + new Point2(i % 2 == 0 ? 1 : -1, 0)));
+                var command = HarnessOperations.MoveComponent(_project, _view, placement, placement.Position + new Point2(i % 2 == 0 ? 1 : -1, 0));
+                var commandMilliseconds = watch.Elapsed.TotalMilliseconds;
+                _history.Execute(command);
+                var executeMilliseconds = watch.Elapsed.TotalMilliseconds - commandMilliseconds;
                 // Measure until the edited drawing can be presented; the full project check is
                 // deliberately coalesced at background priority after interaction settles.
                 await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.Loaded);
@@ -164,6 +169,10 @@ public partial class MainWindow
                     throw new InvalidOperationException($"Bewerking {i + 1} verscheen niet in een nieuw frame.");
                 if (i < 10) coldEditing.Add(elapsed); else editing.Add(elapsed);
                 editDetails.Add(new { warmup = i < 10, elapsedMilliseconds = elapsed,
+                    commandMilliseconds, executeMilliseconds,
+                    allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore,
+                    collections = Enumerable.Range(0, 3).Select(g => GC.CollectionCount(g) - collectionsBefore[g]).ToArray(),
+                    sceneStages = new Dictionary<string, double>(_sceneTimings),
                     stages = new Dictionary<string, double>(_refreshTimings), lastPaintMilliseconds = Canvas.FrameMilliseconds.LastOrDefault() });
                 // Return to the real event loop between user gestures, including property updates.
                 await Task.Delay(25);

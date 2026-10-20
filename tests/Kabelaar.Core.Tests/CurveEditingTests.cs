@@ -245,6 +245,58 @@ public sealed class CurveEditingTests
     }
 
     [Fact]
+    public void BatchComponentMoveUpdatesMatchingDuplicateRoutePlacementsAtomicallyAndUndoes()
+    {
+        var project = DemoFactory.CreatePerformance(2);
+        var view = project.Sheets[0].Views[0];
+        var placement = view.Components[0];
+        var route = view.Routes[0];
+        var duplicate = new PlacedRoute { BranchId = route.BranchId, Points = [.. route.Points], Smooth = route.Smooth };
+        view.Routes.Add(duplicate);
+        var before = JsonSerializer.Serialize(project);
+        var history = new CommandHistory();
+        history.Execute(HarnessOperations.MoveComponent(project, view, placement, placement.Position + new Point2(5, 0)));
+        Assert.Equal(route.Points, duplicate.Points);
+        Assert.Equal(Geometry.Length(route), Geometry.Length(duplicate), 10);
+        Assert.DoesNotContain(ProductionValidator.Validate(project), issue => issue.Code == "route.scaleMismatch");
+        history.Undo();
+        Assert.Equal(before, JsonSerializer.Serialize(project));
+    }
+
+    [Fact]
+    public void BatchComponentMoveRejectsConflictingDuplicateRoutePlacementsWithoutPartialMutation()
+    {
+        var project = DemoFactory.CreatePerformance(2);
+        var view = project.Sheets[0].Views[0];
+        var placement = view.Components[0];
+        var route = view.Routes[0];
+        var reflected = route.Points.Select(point => new Point2(2 * placement.Position.X - point.X, point.Y)).ToList();
+        // Equal initial lengths; moving the shared connector changes the reflected route
+        // in the opposite direction, so the two representations cannot share a new length.
+        view.Routes.Add(new() { BranchId = route.BranchId, Points = reflected, Smooth = route.Smooth });
+        var before = JsonSerializer.Serialize(project);
+        var history = new CommandHistory();
+        Assert.Throws<InvalidOperationException>(() =>
+            history.Execute(HarnessOperations.MoveComponent(project, view, placement, placement.Position + new Point2(5, 0))));
+        Assert.Equal(before, JsonSerializer.Serialize(project));
+        Assert.False(history.IsDirty);
+        Assert.False(history.CanUndo);
+    }
+
+    [Fact]
+    public void BatchComponentMoveStillChecksUnchangedRoutesInOtherScaledViews()
+    {
+        var project = DemoFactory.CreatePerformance(2);
+        var view = project.Sheets[0].Views[0];
+        var route = view.Routes[0];
+        project.Sheets[0].Views.Add(new() { Routes = [new() { BranchId = route.BranchId, Points = [.. route.Points], Smooth = route.Smooth }] });
+        var before = JsonSerializer.Serialize(project);
+        Assert.Throws<InvalidOperationException>(() => HarnessOperations.MoveComponent(project, view, view.Components[0],
+            view.Components[0].Position + new Point2(5, 0)));
+        Assert.Equal(before, JsonSerializer.Serialize(project));
+    }
+
+    [Fact]
     public void PhysicalSplitRetainsCubicShapeAndIndividualOverridesWithoutAddingConductors()
     {
         var (project, view, route, wire) = Fixture();

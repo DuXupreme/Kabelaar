@@ -3,11 +3,15 @@ namespace Kabelaar.Core;
 public static partial class HarnessOperations
 {
     public static IEditCommand SetRouteGeometry(HarnessProject project, DrawingView view, PlacedRoute route,
-        RouteGeometry geometry, bool checkOtherScaledViews = true)
+        RouteGeometry geometry, bool checkOtherScaledViews = true) =>
+        SetRouteGeometryCore(project, view, route, geometry, checkOtherScaledViews, null);
+
+    private static IEditCommand SetRouteGeometryCore(HarnessProject project, DrawingView view, PlacedRoute route,
+        RouteGeometry geometry, bool checkOtherScaledViews, RouteBranch? knownBranch, double? measuredLength = null)
     {
         Geometry.ValidateRouteGeometry(geometry);
-        var branch = project.Assembly.Branches.Single(b => b.Id == route.BranchId);
-        var after = geometry.Copy(); var length = Geometry.Length(after);
+        var branch = knownBranch ?? project.Assembly.Branches.Single(b => b.Id == route.BranchId);
+        var after = geometry.Copy(); var length = measuredLength ?? Geometry.Length(after);
         if (!double.IsFinite(length)) throw new ArgumentException("De routegeometrie is te groot om betrouwbaar te verwerken.");
         if (view.Mode == LayoutMode.Scaled)
         {
@@ -111,5 +115,30 @@ public static partial class HarnessOperations
             .SelectMany(v => v.Routes).Any(r => r != route && r.BranchId == route.BranchId &&
                 Math.Abs(Geometry.Length(r) - newLength) > Geometry.LengthToleranceMm))
             throw new InvalidOperationException("Deze wijziging past niet bij een ander aanzicht op schaal. Pas de betrokken aanzichten eerst expliciet aan of gebruik vrije opmaak.");
+    }
+
+    private static void ValidateScaledRouteBatch(HarnessProject project, IReadOnlyDictionary<PlacedRoute, double> changes)
+    {
+        if (changes.Count == 0) return;
+        var desiredLengths = new Dictionary<string, double>(StringComparer.Ordinal);
+        foreach (var (route, length) in changes)
+        {
+            if (desiredLengths.TryGetValue(route.BranchId, out var otherLength) &&
+                Math.Abs(otherLength - length) > Geometry.LengthToleranceMm)
+                throw new InvalidOperationException("De verplaatste aanzichten geven verschillende lengtes voor dezelfde fysieke tak.");
+            desiredLengths[route.BranchId] = length;
+        }
+        foreach (var sheet in project.Sheets)
+            foreach (var view in sheet.Views)
+            {
+                if (view.Mode != LayoutMode.Scaled) continue;
+                foreach (var route in view.Routes)
+                {
+                    if (!desiredLengths.TryGetValue(route.BranchId, out var expected)) continue;
+                    var actual = changes.TryGetValue(route, out var changedLength) ? changedLength : Geometry.Length(route);
+                    if (Math.Abs(actual - expected) > Geometry.LengthToleranceMm)
+                        throw new InvalidOperationException("Deze wijziging past niet bij een ander aanzicht op schaal. Pas de betrokken aanzichten eerst expliciet aan of gebruik vrije opmaak.");
+                }
+            }
     }
 }

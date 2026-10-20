@@ -49,18 +49,22 @@ public static partial class HarnessOperations
     }
 
     public static IEditCommand SetRoutePoints(HarnessProject project, DrawingView view, PlacedRoute route, IReadOnlyList<Point2> points, bool? smooth = null,
-        bool checkOtherScaledViews = true)
+        bool checkOtherScaledViews = true) =>
+        SetRoutePointsCore(project, view, route, points, smooth, checkOtherScaledViews, null);
+
+    private static IEditCommand SetRoutePointsCore(HarnessProject project, DrawingView view, PlacedRoute route, IReadOnlyList<Point2> points,
+        bool? smooth, bool checkOtherScaledViews, RouteBranch? knownBranch, double? measuredLength = null)
     {
         ValidatePoints(points);
         if (route.Geometry is { } explicitGeometry)
         {
             var updated = Geometry.WithPoints(explicitGeometry, points);
             if (smooth.HasValue) updated = Geometry.WithCurveKind(updated, smooth.Value ? RouteSegmentKind.Cubic : RouteSegmentKind.Line);
-            return SetRouteGeometry(project, view, route, updated, checkOtherScaledViews);
+            return SetRouteGeometryCore(project, view, route, updated, checkOtherScaledViews, knownBranch, measuredLength);
         }
-        var branch = project.Assembly.Branches.Single(b => b.Id == route.BranchId);
+        var branch = knownBranch ?? project.Assembly.Branches.Single(b => b.Id == route.BranchId);
         var afterSmooth = smooth ?? route.Smooth;
-        var length = Geometry.Length(points, afterSmooth);
+        var length = measuredLength ?? Geometry.Length(points, afterSmooth);
         if (view.Mode == LayoutMode.Scaled && branch.LengthLocked &&
             Math.Abs(length - branch.PhysicalLengthMm) > Geometry.LengthToleranceMm)
             throw new InvalidOperationException("De vastgezette taklengte zou veranderen. Ontgrendel de lengte of behoud de bestaande maat.");
@@ -172,22 +176,38 @@ public static partial class HarnessOperations
         var changes = new Dictionary<PlacedRoute, List<Point2>>();
         var wireChanges = new Dictionary<(Conductor Wire, PlacedRoute Route), RouteGeometry>();
         var wiresByBranch = project.Assembly.Conductors.SelectMany(w => w.BranchIds.Select(id => (id, wire: w))).ToLookup(x => x.id, x => x.wire);
+        // These indexes live for one transaction only. Reusing them across its connected
+        // routes avoids repeated full-document scans without stale model caches.
+        var routesByBranch = view.Routes.Where(r => r.Points.Count >= 2).ToLookup(r => r.BranchId, StringComparer.Ordinal);
+        var branchesById = project.Assembly.Branches.ToDictionary(b => b.Id, StringComparer.Ordinal);
+        var movedByEntity = new Dictionary<string, PlacedComponent>(StringComparer.Ordinal);
+        var simulatedPlacements = new Dictionary<PlacedComponent, PlacedComponent>();
+        foreach (var (placement, target) in placements)
+        {
+            movedByEntity.TryAdd(placement.EntityId, placement);
+            simulatedPlacements[placement] = new() { EntityId = placement.EntityId, Position = target.Position, RotationDegrees = target.Rotation, DisplayScale = target.Scale };
+        }
+        var componentsByEntity = new Dictionary<string, PlacedComponent>(StringComparer.Ordinal);
+        foreach (var placement in view.Components) componentsByEntity.TryAdd(placement.EntityId, placement);
+        var wirePresentations = view.WirePresentations.ToDictionary(p => p.ConductorId, StringComparer.Ordinal);
         foreach (var wire in project.Assembly.Conductors)
         {
-            foreach (var (endpoint, first) in new[] { (wire.From, true), (wire.To, false) })
+            for (var end = 0; end < 2; end++)
             {
-                var placement = placements.Keys.FirstOrDefault(p => p.EntityId == endpoint.EntityId);
-                if (placement is null || endpoint.Kind == EndpointKind.Free || wire.BranchIds.Count == 0) continue;
-                var target = placements[placement];
-                var simulated = new PlacedComponent { EntityId = placement.EntityId, Position = target.Position, RotationDegrees = target.Rotation, DisplayScale = target.Scale };
+                var first = end == 0;
+                var endpoint = first ? wire.From : wire.To;
+                if (endpoint.Kind == EndpointKind.Free || wire.BranchIds.Count == 0 || endpoint.EntityId is null ||
+                    !movedByEntity.TryGetValue(endpoint.EntityId, out var placement)) continue;
+                var simulated = simulatedPlacements[placement];
                 var branchId = first ? wire.BranchIds[0] : wire.BranchIds[^1];
                 var oldPin = endpoint.CavityId is { } cavityId && previousPinPositions?.TryGetValue(cavityId, out var previousPin) == true
                     ? previousPin : Geometry.PinWorld(project, placement, endpoint.CavityId);
                 var newPin = Geometry.PinWorld(project, simulated, endpoint.CavityId);
                 if (oldPin is null || newPin is null) continue;
-                foreach (var route in view.Routes.Where(r => r.BranchId == branchId && r.Points.Count >= 2))
+                foreach (var route in routesByBranch[branchId])
                 {
-                    var wireOverride = view.WirePresentations.Find(p => p.ConductorId == wire.Id)?.Routes.Find(r => r.BranchId == branchId);
+                    var wireOverride = wirePresentations.TryGetValue(wire.Id, out var presentation)
+                        ? presentation.Routes.Find(r => r.BranchId == branchId) : null;
                     if (wireOverride is not null)
                     {
                         var key = (wire, route);
@@ -198,7 +218,7 @@ public static partial class HarnessOperations
                         geometry.Knots[endIndex].Position = newPin.Value;
                         continue;
                     }
-                    if (view.Mode == LayoutMode.Free && wiresByBranch[branchId].Take(2).Count() > 1) continue;
+                    if (view.Mode == LayoutMode.Free && wiresByBranch[branchId].Count() > 1) continue;
                     if (!changes.TryGetValue(route, out var points)) changes[route] = points = [.. route.Points];
                     var index = route.Points[0].DistanceTo(oldPin.Value) <= route.Points[^1].DistanceTo(oldPin.Value) ? 0 : points.Count - 1;
                     points[index] = newPin.Value;
@@ -219,16 +239,16 @@ public static partial class HarnessOperations
             var endDelta = points[^1] - route.Points[^1];
             if (startDelta.DistanceTo(endDelta) <= 1e-9)
                 for (var i = 0; i < points.Count; i++) points[i] = route.Points[i] + startDelta;
-            if (view.Mode == LayoutMode.Scaled && wiresByBranch[route.BranchId].Take(2).Count() > 1)
+            if (view.Mode == LayoutMode.Scaled && wiresByBranch[route.BranchId].Count() > 1)
                 foreach (var shared in wiresByBranch[route.BranchId])
-                    foreach (var (endpoint, first) in new[] { (shared.From, true), (shared.To, false) })
+                    for (var end = 0; end < 2; end++)
                     {
+                        var first = end == 0;
+                        var endpoint = first ? shared.From : shared.To;
                         if (endpoint.Kind == EndpointKind.Free || (first ? shared.BranchIds[0] : shared.BranchIds[^1]) != route.BranchId) continue;
-                        var anchor = view.Components.Find(p => p.EntityId == endpoint.EntityId);
-                        if (anchor is null) continue;
+                        if (endpoint.EntityId is null || !componentsByEntity.TryGetValue(endpoint.EntityId, out var anchor)) continue;
                         var oldPoint = Geometry.PinWorld(project, anchor, endpoint.CavityId);
-                        var target = placements.TryGetValue(anchor, out var moved)
-                            ? new PlacedComponent { EntityId = anchor.EntityId, Position = moved.Position, RotationDegrees = moved.Rotation, DisplayScale = moved.Scale } : anchor;
+                        var target = simulatedPlacements.TryGetValue(anchor, out var simulated) ? simulated : anchor;
                         var expected = Geometry.PinWorld(project, target, endpoint.CavityId);
                         if (oldPoint is null || expected is null) continue;
                         var endIndex = route.Points[0].DistanceTo(oldPoint.Value) <= route.Points[^1].DistanceTo(oldPoint.Value) ? 0 : points.Count - 1;
@@ -237,7 +257,15 @@ public static partial class HarnessOperations
                     }
         }
         // Construct every route command before applying any; one failed lock leaves the whole edit untouched.
-        var routeCommands = changes.Select(change => SetRoutePoints(project, view, change.Key, change.Value)).ToArray();
+        Dictionary<PlacedRoute, double>? changedLengths = null;
+        if (view.Mode == LayoutMode.Scaled)
+        {
+            changedLengths = changes.ToDictionary(change => change.Key, change => change.Key.Geometry is { } geometry
+                ? Geometry.Length(Geometry.WithPoints(geometry, change.Value)) : Geometry.Length(change.Value, change.Key.Smooth));
+            ValidateScaledRouteBatch(project, changedLengths);
+        }
+        var routeCommands = changes.Select(change => SetRoutePointsCore(project, view, change.Key, change.Value, null,
+            checkOtherScaledViews: false, branchesById[change.Key.BranchId], changedLengths?.GetValueOrDefault(change.Key))).ToArray();
         var wireCommands = wireChanges.Select(change => SetWireRouteGeometry(project, view, change.Key.Wire, change.Key.Route, change.Value)).ToArray();
         var positionCommands = placements.Select(entry =>
         {

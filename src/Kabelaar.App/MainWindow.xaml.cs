@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     private List<ValidationIssue> _issues = [];
     private string _treeSignature = "", _librarySignature = "";
     private readonly Dictionary<string, double> _refreshTimings = [];
+    private readonly Dictionary<string, double> _sceneTimings = [];
     private WireDisplay[] _wireRows = [];
     private bool _propertiesRefreshQueued;
     private PartDefinition? SelectedPart => LibraryList.SelectedItem as PartDefinition;
@@ -144,7 +145,8 @@ public partial class MainWindow : Window
             else RefreshValidation();
             Measure("validation");
             Canvas.ActiveViewId = _view.Id;
-            Canvas.SetScene(SceneBuilder.Build(_project, _sheet));
+            Canvas.SetScene(SceneBuilder.Build(_project, _sheet,
+                timing: App.IsBackgroundAcceptance ? (stage, elapsed) => _sceneTimings[stage] = elapsed : null));
             Measure("scene");
             if (deferValidation) QueuePropertiesRefresh();
             else ShowProperties();
