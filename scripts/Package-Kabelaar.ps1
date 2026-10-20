@@ -51,10 +51,37 @@ if ($LASTEXITCODE -ne 0) { throw 'Velopack packaging failed.' }
 foreach ($required in @('Kabelaar-win-Setup.exe','Kabelaar-win-Portable.zip','releases.win.json')) {
     if (!(Test-Path -LiteralPath (Join-Path $OutputDirectory $required))) { throw "Velopack output missing: $required" }
 }
+# Check actual payloads, not only the pre-packaging build directory. Velopack has
+# built-in exclusions for the .NET dump collector as well as the default PDB filter.
+$fullPackages = @(Get-ChildItem -LiteralPath $OutputDirectory -Filter '*-full.nupkg' -File)
+if ($fullPackages.Count -ne 1) { throw 'Expected exactly one full update package.' }
+$payloadCounts = [ordered]@{}
+foreach ($archive in @(
+    @{ Path=$fullPackages[0].FullName; Prefix='lib/app/' },
+    @{ Path=(Join-Path $OutputDirectory 'Kabelaar-win-Portable.zip'); Prefix='current/' }
+)) {
+    $zip = [IO.Compression.ZipFile]::OpenRead($archive.Path)
+    try {
+        $verified = 0
+        foreach ($file in $build.files) {
+            if ($file.path -like '*.pdb' -or $file.path -eq 'createdump.exe') { continue }
+            $entryName = $archive.Prefix + $file.path.Replace('\','/')
+            $entry = $zip.GetEntry($entryName)
+            if ($null -eq $entry) { throw "Package payload is missing: $entryName" }
+            $stream = $entry.Open()
+            try { $hash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)) }
+            finally { $stream.Dispose() }
+            if ($hash -ne $file.sha256) { throw "Packaged file differs from tested build: $entryName" }
+            $verified++
+        }
+        $payloadCounts[[IO.Path]::GetFileName($archive.Path)] = $verified
+    } finally { $zip.Dispose() }
+}
 Copy-Item -LiteralPath $metadataPath -Destination "$OutputDirectory\tested-build-info.json"
 $hashes = @(Get-ChildItem -LiteralPath $OutputDirectory -File | ForEach-Object {
     [ordered]@{ name=$_.Name; sha256=(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash; bytes=$_.Length }
 })
-[ordered]@{ version=$build.version; commit=$commit; published=$false; acceptanceStatus=$build.acceptanceStatus; assets=$hashes } |
+[ordered]@{ version=$build.version; commit=$commit; published=$false; acceptanceStatus=$build.acceptanceStatus;
+    verifiedPayloadFiles=$payloadCounts; excludedBuildFiles=@($build.files.path | Where-Object { $_ -like '*.pdb' -or $_ -eq 'createdump.exe' }); assets=$hashes } |
     ConvertTo-Json -Depth 5 | Set-Content -LiteralPath "$OutputDirectory\package-verification.json" -Encoding utf8
 "Local installer and portable package ready: $OutputDirectory"

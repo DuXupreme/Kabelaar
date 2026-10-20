@@ -116,7 +116,9 @@ function Verify-InstalledFiles {
     $checked = 0
     foreach ($file in $expected.files) {
         # vpk's documented default excludes PDB debug symbols, not runtime binaries.
-        if ($file.path -like '*.pdb') { continue }
+        # Velopack omits debugging symbols and the .NET dump collector by default.
+        # Package-Kabelaar verifies every other build file in both package formats.
+        if ($file.path -like '*.pdb' -or $file.path -eq 'createdump.exe') { continue }
         $path = [IO.Path]::GetFullPath((Join-Path $current $file.path))
         if (!$path.StartsWith($current.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase) -or
             (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.sha256) { throw "Installed runtime mismatch: $($file.path)" }
