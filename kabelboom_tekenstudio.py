@@ -106,7 +106,12 @@ from model import (
     WIRE_STYLE_TO_INTERNAL,
     WIRE_STYLE_TO_LABEL,
     WirePath,
+    CONNECTOR_PINOUT_CSV_HEADER,
+    connector_bom_rows,
     connector_pin_label,
+    connector_pin_table_text,
+    connector_pinout_rows,
+    connector_populated_pin_count,
     csv_text,
     DEFAULT_NODE_KIND,
     dimension_orientation_internal,
@@ -119,7 +124,10 @@ from model import (
     normalize_wire_style,
     paper_preset_dimensions,
     paper_preset_for_dimensions,
+    parse_connector_pin_table,
     parse_pin_labels,
+    parse_part_numbers,
+    part_numbers_text,
     pin_labels_text,
     safe_name,
     try_float,
@@ -2688,7 +2696,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         state = "normal" if enabled else "disabled"
         self.prop_color_b_pick_btn.configure(state=state)
 
-    def _set_prop_widget_state(self, widget: ttk.Entry, enabled: bool):
+    def _set_prop_widget_state(self, widget, enabled: bool):
         widget.configure(state=("normal" if enabled else "disabled"))
 
     def _set_leader_text_controls_state(self, enabled: bool):
@@ -2821,15 +2829,49 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
         ]:
             widget.configure(state=state)
 
+    def _set_multiline_property_text(self, widget, text: str, enabled: bool):
+        widget.configure(state="normal")
+        widget.delete("1.0", "end")
+        if text:
+            widget.insert("1.0", text)
+        widget.configure(state=("normal" if enabled else "disabled"))
+
+    def _get_multiline_property_text(self, widget) -> str:
+        return widget.get("1.0", "end").strip()
+
     def _load_connector_pin_properties(self, connector: Optional[ConnectorInstance], enabled: bool):
         self.prop_connector_part_var.set(connector.part_number if connector else "")
         self.prop_connector_pin_count_var.set(f"{max(1, connector.pin_count):g}" if connector else "1")
         self.prop_connector_pin_labels_var.set(pin_labels_text(connector.pin_labels) if connector else "")
+        self._set_multiline_property_text(
+            self.prop_connector_mating_text,
+            part_numbers_text(connector.mating_part_numbers) if connector else "",
+            enabled,
+        )
+        self._set_multiline_property_text(
+            self.prop_connector_terminal_text,
+            part_numbers_text(connector.terminal_part_numbers) if connector else "",
+            enabled,
+        )
+        self._set_multiline_property_text(
+            self.prop_connector_accessory_text,
+            part_numbers_text(connector.accessory_part_numbers) if connector else "",
+            enabled,
+        )
+        self._set_multiline_property_text(
+            self.prop_connector_pin_table_text,
+            connector_pin_table_text(connector) if connector else "",
+            enabled,
+        )
         state = "normal" if enabled else "disabled"
         for widget in [
             self.prop_connector_part_entry,
             self.prop_connector_pin_count_entry,
             self.prop_connector_pin_labels_entry,
+            self.prop_connector_mating_text,
+            self.prop_connector_terminal_text,
+            self.prop_connector_accessory_text,
+            self.prop_connector_pin_table_text,
         ]:
             widget.configure(state=state)
 
@@ -3360,7 +3402,7 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
             conn = self._find_connector(ident)
             if not conn:
                 return
-            self._set_visible_property_rows({0, 1, 2, 3, 4, 16, 17, 18, 21, 22, 28})
+            self._set_visible_property_rows({0, 1, 2, 3, 4, 16, 17, 18, 21, 22, 28, 29, 30, 31, 32})
             self._set_text_property_label("Notitie")
             selected_count = self._selection_count_for_kind("connector")
             self.prop_target_var.set(f"{selected_count} connectors geselecteerd" if selected_count > 1 else f"Connector {conn.connector_id}")
@@ -3757,8 +3799,14 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                     conn.note = text_value.strip()
                 if apply_connector_detail:
                     conn.part_number = self.prop_connector_part_var.get().strip()
+                    conn.mating_part_numbers = parse_part_numbers(self._get_multiline_property_text(self.prop_connector_mating_text))
+                    conn.terminal_part_numbers = parse_part_numbers(self._get_multiline_property_text(self.prop_connector_terminal_text))
+                    conn.accessory_part_numbers = parse_part_numbers(self._get_multiline_property_text(self.prop_connector_accessory_text))
                     conn.pin_count = max(1, int(try_float(self.prop_connector_pin_count_var.get(), 1)))
                     conn.pin_labels = parse_pin_labels(self.prop_connector_pin_labels_var.get())
+                    conn.pin_names, conn.pin_connections = parse_connector_pin_table(
+                        self._get_multiline_property_text(self.prop_connector_pin_table_text)
+                    )
                     conn.label_dx_mm = round(try_float(self.prop_connector_label_dx_var.get(), conn.label_dx_mm), 3)
                     conn.label_dy_mm = round(try_float(self.prop_connector_label_dy_var.get(), conn.label_dy_mm), 3)
                 touched_connectors = True
@@ -8200,8 +8248,13 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 line_width_mm=obj.line_width_mm,
                 note=obj.note,
                 part_number=obj.part_number,
+                mating_part_numbers=list(obj.mating_part_numbers),
+                terminal_part_numbers=list(obj.terminal_part_numbers),
+                accessory_part_numbers=list(obj.accessory_part_numbers),
                 pin_count=obj.pin_count,
                 pin_labels=list(obj.pin_labels),
+                pin_names=dict(obj.pin_names),
+                pin_connections=dict(obj.pin_connections),
                 label_dx_mm=obj.label_dx_mm,
                 label_dy_mm=obj.label_dy_mm,
                 pin_offsets_mm=list(obj.pin_offsets_mm),
@@ -8778,6 +8831,8 @@ class HarnessDrawingStudio(UIBuilderMixin, RenderingMixin, ProjectIOMixin, tk.Tk
                 findings.append(f"[FOUT] Connector {c.connector_id} heeft geen geldige pin-count.")
             if c.pin_labels and len(set(c.pin_labels)) != len(c.pin_labels):
                 warns.append(f"[WAARSCHUWING] Connector {c.connector_id} heeft dubbele pinlabels.")
+            if connector_populated_pin_count(c, self.wires) > 0 and not c.terminal_part_numbers:
+                warns.append(f"[WAARSCHUWING] Connector {c.connector_id} heeft gevulde pins maar geen terminal-partnummer.")
 
         for w in self.wires:
             polylines = self._wire_display_polylines(w)

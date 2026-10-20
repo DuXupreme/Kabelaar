@@ -22,7 +22,11 @@ from kabelboom_tekenstudio import (
     StepGeometry3D,
     StepSymbol,
     WirePath,
+    connector_bom_rows,
+    connector_pinout_rows,
     connector_pin_label,
+    connector_pin_table_text,
+    connector_populated_pin_count,
     migrate_project_dict,
     node_kind_internal,
     node_kind_label,
@@ -42,8 +46,11 @@ from kabelboom_tekenstudio import (
     polyline_segment_count,
     parse_step_geometry,
     parse_step_length_scale,
+    parse_connector_pin_table,
     circle_arc_points_3d,
     project_step_geometry,
+    parse_part_numbers,
+    part_numbers_text,
     safe_name,
     try_float,
     wire_style_internal,
@@ -227,6 +234,48 @@ class TekenstudioModelHelpersTest(unittest.TestCase):
         self.assertEqual(payload["pin_count"], 12)
         self.assertEqual(payload["pin_labels"], ["A1", "A2", "CAN_H", "CAN_L"])
         self.assertEqual(pin_labels_text(connector.pin_labels), "A1, A2, CAN_H, CAN_L")
+
+    def test_connector_pinout_and_parts_export_to_rows(self):
+        connector = ConnectorInstance(
+            connector_id="J100",
+            symbol_name="sym",
+            x_mm=0.0,
+            y_mm=0.0,
+            part_number="DTM06-2S",
+            mating_part_numbers=parse_part_numbers("DTM04-2P"),
+            terminal_part_numbers=parse_part_numbers("0462-201-16141"),
+            accessory_part_numbers=parse_part_numbers("W2S x1\nCAVITY-PLUG x2"),
+            pin_count=2,
+            pin_labels=["A1", "A2"],
+        )
+        connector.pin_names, connector.pin_connections = parse_connector_pin_table("A1; Voeding; ECU:A7\nA2; CAN_H;")
+        wires = [
+            WirePath(
+                wire_id="W1",
+                points_mm=[(0.0, 0.0), (10.0, 0.0)],
+                signal_name="VBAT",
+                net_name="PWR",
+                from_connector="J100",
+                from_pin="A1",
+                to_connector="J200",
+                to_pin="7",
+                length_mm=120.0,
+            )
+        ]
+
+        pinout_rows = connector_pinout_rows([connector], wires)
+        bom_rows = connector_bom_rows([connector], wires)
+        bom_by_type = {(row[0], str(row[1]).split(" (", 1)[0]): row for row in bom_rows}
+
+        self.assertEqual(part_numbers_text(connector.mating_part_numbers), "DTM04-2P")
+        self.assertIn("A1; Voeding; ECU:A7", connector_pin_table_text(connector))
+        self.assertEqual(connector_populated_pin_count(connector, wires), 2)
+        self.assertTrue(any(row[0] == "J100" and row[2] == "A1" and row[4] == "ECU:A7" and row[5] == "W1" for row in pinout_rows))
+        self.assertTrue(any(row[2] == "A2" and row[3] == "CAN_H" for row in pinout_rows))
+        self.assertEqual(bom_by_type[("Connector", "DTM06-2S")][2], 1)
+        self.assertEqual(bom_by_type[("Mating connector", "DTM04-2P")][2], 1)
+        self.assertEqual(bom_by_type[("Terminal", "0462-201-16141")][2], 2)
+        self.assertEqual(bom_by_type[("Accessoire", "CAVITY-PLUG")][2], 2)
 
     def test_clear_selection_resets_selection_sets(self):
         app = HarnessDrawingStudio.__new__(HarnessDrawingStudio)
@@ -663,7 +712,7 @@ class Batch8ConnectivityFoundationTest(unittest.TestCase):
         migrated = migrate_project_dict(v1)
 
         self.assertEqual(migrated["schema_version"], TEKENSTUDIO_SCHEMA_VERSION)
-        self.assertEqual(migrated["schema_version"], 2)
+        self.assertEqual(migrated["schema_version"], 3)
         self.assertEqual(migrated["nodes"], [])
         self.assertEqual(migrated["wires"][0]["from_node"], "")
         self.assertEqual(migrated["wires"][0]["to_node"], "")
@@ -680,6 +729,24 @@ class Batch8ConnectivityFoundationTest(unittest.TestCase):
         upgraded = migrate_project_dict({"wires": []})
         self.assertEqual(upgraded["schema_version"], TEKENSTUDIO_SCHEMA_VERSION)
         self.assertEqual(upgraded["nodes"], [])
+
+    def test_migrate_v2_project_adds_connector_bom_fields(self):
+        v2 = {
+            "schema_version": 2,
+            "nodes": [],
+            "wires": [],
+            "connectors": [{"connector_id": "J1", "part_number": "DTM06-2S"}],
+        }
+
+        migrated = migrate_project_dict(v2)
+        connector = migrated["connectors"][0]
+
+        self.assertEqual(migrated["schema_version"], TEKENSTUDIO_SCHEMA_VERSION)
+        self.assertEqual(connector["mating_part_numbers"], [])
+        self.assertEqual(connector["terminal_part_numbers"], [])
+        self.assertEqual(connector["accessory_part_numbers"], [])
+        self.assertEqual(connector["pin_names"], {})
+        self.assertEqual(connector["pin_connections"], {})
 
     def test_node_dataclass_and_kind_helpers(self):
         node = Node(node_id="SP1", kind="splice", x_mm=5.0, y_mm=6.0, label="CAN splice")

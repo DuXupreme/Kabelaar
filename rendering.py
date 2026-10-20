@@ -852,9 +852,10 @@ class RenderingMixin:
             if not href:
                 continue
             width_mm, height_mm = self._image_note_display_size(note)
+            escaped_href = escape(href, {'"': "&quot;"})
             out.append(
                 f'<image x="{note.x_mm:.3f}" y="{note.y_mm:.3f}" width="{width_mm:.3f}" height="{height_mm:.3f}" '
-                f'href="{escape(href, {"\"": "&quot;"})}" preserveAspectRatio="none"/>'
+                f'href="{escaped_href}" preserveAspectRatio="none"/>'
             )
         return out
 

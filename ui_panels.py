@@ -639,6 +639,7 @@ class UIBuilderMixin:
             ("Controle", self.run_project_check, "Projectcontrole (DRC): controleer draden tegen connector-pinnen", 3, 1, 2),
             ("Netlist CSV", self.export_netlist_csv, "Exporteer netlist (draadverbindingen) als CSV", 4, 0, 2),
             ("BOM CSV", self.export_bom_csv, "Exporteer stuklijst (BOM) als CSV", 4, 1, 2),
+            ("Pinout CSV", self.export_connector_pinout_csv, "Exporteer connector pin-/cavity-tabel als CSV", 5, 0, 2),
         ]
         for text, command, tip, r, c, pady in export_buttons:
             padx = (0, 3) if c == 0 else (3, 0)
@@ -853,6 +854,15 @@ class UIBuilderMixin:
         add_field(conn_block, 17, "Connector pins", self.prop_connector_pin_count_entry)
         self.prop_connector_pin_labels_entry = ttk.Entry(conn_block, textvariable=self.prop_connector_pin_labels_var)
         add_field(conn_block, 18, "Pinlabels", self.prop_connector_pin_labels_entry)
+        text_font = tkfont.nametofont("TkTextFont")
+        self.prop_connector_mating_text = tk.Text(conn_block, height=3, width=24, wrap="word", font=text_font, undo=True)
+        add_field(conn_block, 29, "Mating parts", self.prop_connector_mating_text)
+        self.prop_connector_terminal_text = tk.Text(conn_block, height=3, width=24, wrap="word", font=text_font, undo=True)
+        add_field(conn_block, 30, "Terminals", self.prop_connector_terminal_text)
+        self.prop_connector_accessory_text = tk.Text(conn_block, height=3, width=24, wrap="word", font=text_font, undo=True)
+        add_field(conn_block, 31, "Wedges/plugs", self.prop_connector_accessory_text)
+        self.prop_connector_pin_table_text = tk.Text(conn_block, height=6, width=24, wrap="none", font=text_font, undo=True)
+        add_field(conn_block, 32, "Pin tabel", self.prop_connector_pin_table_text)
         self.prop_connector_label_offset_label = ttk.Label(conn_block, text="Naam offset mm")
         label_offset_row = ttk.Frame(conn_block)
         label_offset_row.columnconfigure(0, weight=1)
@@ -1027,6 +1037,7 @@ class UIBuilderMixin:
         project_menu.add_command(label="Exporteer PDF...", command=self.export_pdf)
         project_menu.add_command(label="Exporteer netlist CSV...", command=self.export_netlist_csv)
         project_menu.add_command(label="Exporteer BOM CSV...", command=self.export_bom_csv)
+        project_menu.add_command(label="Exporteer connector pinout CSV...", command=self.export_connector_pinout_csv)
         menu.add_cascade(label="Bestand", menu=project_menu)
 
         edit_menu = tk.Menu(menu, tearoff=0)
@@ -1083,6 +1094,7 @@ class UIBuilderMixin:
         file_menu.add_command(label="Exporteer PDF...", command=self.export_pdf)
         file_menu.add_command(label="Exporteer netlist CSV...", command=self.export_netlist_csv)
         file_menu.add_command(label="Exporteer BOM CSV...", command=self.export_bom_csv)
+        file_menu.add_command(label="Exporteer connector pinout CSV...", command=self.export_connector_pinout_csv)
         file_menu.add_separator()
         file_menu.add_command(label="Afsluiten", command=self._on_close)
         menubar.add_cascade(label="Bestand", menu=file_menu)

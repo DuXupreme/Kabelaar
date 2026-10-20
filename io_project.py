@@ -19,6 +19,7 @@ from project_io import write_text_atomic
 from geometry import clamp
 from model import (
     BOM_CSV_HEADER,
+    CONNECTOR_PINOUT_CSV_HEADER,
     ConnectorInstance,
     DEFAULT_PAPER_PRESET,
     DEFAULT_WIRE_BRIDGE_CLEARANCE_MM,
@@ -35,6 +36,8 @@ from model import (
     TableBox,
     TextNote,
     WirePath,
+    connector_bom_rows,
+    connector_pinout_rows,
     csv_text,
     migrate_project_dict,
     normalize_dimension_orientation,
@@ -42,6 +45,7 @@ from model import (
     normalize_wire_style,
     paper_preset_dimensions,
     paper_preset_for_dimensions,
+    parse_part_numbers,
     safe_name,
     try_float,
     wire_bom_rows,
@@ -251,6 +255,25 @@ class ProjectIOMixin:
                 continue
 
         self.connectors = []
+
+        def text_list(value) -> list[str]:
+            if isinstance(value, str):
+                return parse_part_numbers(value)
+            if isinstance(value, list):
+                return [str(item).strip() for item in value if str(item).strip()]
+            return []
+
+        def text_map(value) -> dict[str, str]:
+            if not isinstance(value, dict):
+                return {}
+            out: dict[str, str] = {}
+            for key, item in value.items():
+                clean_key = str(key).strip()
+                clean_item = str(item).strip()
+                if clean_key and clean_item:
+                    out[clean_key] = clean_item
+            return out
+
         for raw in data.get("connectors", []):
             try:
                 self.connectors.append(
@@ -267,8 +290,13 @@ class ProjectIOMixin:
                         line_width_mm=float(raw.get("line_width_mm", self.default_connector_line_width_mm)),
                         note=str(raw.get("note", "")),
                         part_number=str(raw.get("part_number", "")),
+                        mating_part_numbers=text_list(raw.get("mating_part_numbers", [])),
+                        terminal_part_numbers=text_list(raw.get("terminal_part_numbers", [])),
+                        accessory_part_numbers=text_list(raw.get("accessory_part_numbers", [])),
                         pin_count=max(1, int(raw.get("pin_count", 1))),
                         pin_labels=[str(label).strip() for label in raw.get("pin_labels", []) if str(label).strip()],
+                        pin_names=text_map(raw.get("pin_names", {})),
+                        pin_connections=text_map(raw.get("pin_connections", {})),
                         label_dx_mm=float(raw.get("label_dx_mm", 0.0)),
                         label_dy_mm=float(raw.get("label_dy_mm", -6.0)),
                         pin_offsets_mm=[(float(px), float(py)) for px, py in raw.get("pin_offsets_mm", [])],
@@ -694,8 +722,30 @@ class ProjectIOMixin:
         except Exception as exc:
             self._show_error(f"BOM CSV export mislukt:\n{exc}")
 
+    def export_connector_pinout_csv(self):
+        name = safe_name(self.project_name_var.get(), "kabelboom")
+        path = self._ask_save_filename(
+            title="Exporteer connector pinout CSV",
+            defaultextension=".csv",
+            initialfile=f"{name}_connector_pinout.csv",
+            filetypes=[("CSV", "*.csv"), ("Alle bestanden", "*.*")],
+            settings_key="last_export_dir",
+        )
+        if not path:
+            return
+        try:
+            self._write_connector_pinout_csv(Path(path))
+            self.status(f"Connector pinout CSV geexporteerd: {Path(path).name}")
+            self._show_info(f"Connector pinout CSV gemaakt:\n{path}")
+        except Exception as exc:
+            self._show_error(f"Connector pinout CSV export mislukt:\n{exc}")
+
     def _write_netlist_csv(self, path: Path):
         write_text_atomic(path, csv_text(NETLIST_CSV_HEADER, wire_netlist_rows(self.wires)))
 
     def _write_bom_csv(self, path: Path):
-        write_text_atomic(path, csv_text(BOM_CSV_HEADER, wire_bom_rows(self.wires)))
+        rows = wire_bom_rows(self.wires) + connector_bom_rows(self.connectors, self.wires)
+        write_text_atomic(path, csv_text(BOM_CSV_HEADER, rows))
+
+    def _write_connector_pinout_csv(self, path: Path):
+        write_text_atomic(path, csv_text(CONNECTOR_PINOUT_CSV_HEADER, connector_pinout_rows(self.connectors, self.wires)))

@@ -17,7 +17,8 @@ Interactieve tekenapp voor kabelboom-werkbladen.
 - In de preview kun je het model roteren en daarna projectiezijde kiezen:
   - `Top (XY)`, `Bottom (XY)`, `Front (XZ)`, `Back (XZ)`, `Left (YZ)`, `Right (YZ)`
 - Connectoren plaatsen en verplaatsen op het blad
-- Connectoren krijgen part number, pin-count en optionele pinlabels/cavity labels
+- Connectoren krijgen part number, mating parts, terminal parts, wedges/plugs/accessoires, pin-count en optionele pinlabels/cavity labels
+- Per connector kun je een pin-tabel invullen als `pin; benaming; connectie`; pinout CSV combineert dit met draadverbindingen
 - Knopen plaatsen via de workflowbalk-knop "Knoop" of rechtermuisknop "Knoop plaatsen hier": splice, massapunt, ringterminal of algemeen knooppunt — selecteer-/sleep-/dupliceer-/verwijderbaar met een eigen symbool per type. Naam bewerk je in het eigenschappenpaneel en is los versleepbaar (offset blijft relatief aan de knoop); dubbele namen worden geblokkeerd. Draadeinden snappen naar knopen, en een knoop slepen neemt de erop gesnapte draadeinden mee (junction). Tijdens het tekenen koppelt een draadeinde dat op een knoop/pin valt zich meteen (`from_node`/`to_node` of `from_connector`/`from_pin`); `Tools ▸ Netlist uit tekening afleiden` doet dit achteraf voor alle draden. Netlist en DRC zijn knoop-bewust
 - Draden tekenen: elke klik zet direct een endpoint en maakt een segment
 - Elk draadsegment is apart selecteerbaar
@@ -36,7 +37,7 @@ Interactieve tekenapp voor kabelboom-werkbladen.
 - Vast eigenschappenpaneel (links) voor geselecteerd object:
   - Wire: kleur, dikte, label
   - Leader: kleur, dikte, tekst, tekstgrootte, pijlgrootte en optioneel tekstkader
-  - Connector: lijnkleur, lijndikte, schaal
+  - Connector: lijnkleur, lijndikte, schaal, partnummers, terminals/accessoires en pin-tabel
   - Tabel: randkleur, lijndikte
 - Workflowbalk boven het tekenblad voor snel wisselen tussen selecteren, draad, leader, connector en tabel
 - Linkerpaneel is geordend als Start, Eigenschappen, Bibliotheek, Tekening en Bestand/export
@@ -50,7 +51,7 @@ Interactieve tekenapp voor kabelboom-werkbladen.
 - Projectinstellingen/default stijlen en view/snap-voorkeuren worden mee opgeslagen
 - Anti-aliased schermweergave via een gecachete Pillow-scène; selectiehandles en slepen blijven interactieve overlays
 - Exporteren naar SVG
-- Exporteren naar netlist CSV en BOM CSV vanuit draadmetadata
+- Exporteren naar netlist CSV, connector pinout CSV en BOM CSV; BOM neemt draadlengtes en connectoronderdelen mee
 - Menubalk met engineering-acties (`Bestand`, `Bewerken`, `Beeld`, `Tools`)
 - Projectcontrole (DRC) + projectinventarisrapport
 - DRC controleert draadpinnen tegen connector pin-count en bekende pinlabels

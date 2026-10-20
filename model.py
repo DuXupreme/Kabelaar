@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
 
-PROJECT_SCHEMA_VERSION = 2
+PROJECT_SCHEMA_VERSION = 3
 DEFAULT_WIRE_BRIDGE_ENABLED = True
 DEFAULT_WIRE_BRIDGE_HEIGHT_MM = 2.8
 DEFAULT_WIRE_BRIDGE_LENGTH_MM = 8.5
@@ -127,8 +127,13 @@ class ConnectorInstance:
     line_width_mm: float = 0.6
     note: str = ""
     part_number: str = ""
+    mating_part_numbers: List[str] = field(default_factory=list)
+    terminal_part_numbers: List[str] = field(default_factory=list)
+    accessory_part_numbers: List[str] = field(default_factory=list)
     pin_count: int = 1
     pin_labels: List[str] = field(default_factory=list)
+    pin_names: Dict[str, str] = field(default_factory=dict)
+    pin_connections: Dict[str, str] = field(default_factory=dict)
     label_dx_mm: float = 0.0
     label_dy_mm: float = -6.0
     pin_offsets_mm: List[Tuple[float, float]] = field(default_factory=list)
@@ -191,8 +196,21 @@ def _migrate_v1_to_v2(data: dict) -> dict:
     return data
 
 
+def _migrate_v2_to_v3(data: dict) -> dict:
+    """v2 -> v3: connector-BOM en pinfunctie/connectie metadata toegevoegd."""
+    for connector in data.get("connectors", []):
+        if isinstance(connector, dict):
+            connector.setdefault("mating_part_numbers", [])
+            connector.setdefault("terminal_part_numbers", [])
+            connector.setdefault("accessory_part_numbers", [])
+            connector.setdefault("pin_names", {})
+            connector.setdefault("pin_connections", {})
+    return data
+
+
 _PROJECT_MIGRATIONS = {
     1: _migrate_v1_to_v2,
+    2: _migrate_v2_to_v3,
 }
 
 
@@ -273,6 +291,112 @@ def pin_labels_text(labels: List[str]) -> str:
     return ", ".join(str(label).strip() for label in labels if str(label).strip())
 
 
+def parse_part_numbers(text: str) -> List[str]:
+    """Lees een compacte partnummer-lijst uit losse regels, komma's of puntkomma's."""
+    parts = [part.strip() for part in re.split(r"[,;\n]+", str(text or ""))]
+    return [part for part in parts if part]
+
+
+def part_numbers_text(parts: List[str]) -> str:
+    return "\n".join(str(part).strip() for part in parts if str(part).strip())
+
+
+def _clean_text_map(values) -> Dict[str, str]:
+    if not isinstance(values, dict):
+        return {}
+    out: Dict[str, str] = {}
+    for key, value in values.items():
+        clean_key = str(key).strip()
+        clean_value = str(value).strip()
+        if clean_key and clean_value:
+            out[clean_key] = clean_value
+    return out
+
+
+def parse_connector_pin_table(text: str) -> Tuple[Dict[str, str], Dict[str, str]]:
+    """Parseer regels als ``pin; benaming; connectie`` naar twee pin-maps."""
+    pin_names: Dict[str, str] = {}
+    pin_connections: Dict[str, str] = {}
+    for raw_line in str(text or "").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = re.split(r"\s*[;\t|]\s*", line, maxsplit=2)
+        if len(parts) == 1:
+            parts = [part.strip() for part in line.split(",", 2)]
+        pin = parts[0].strip() if parts else ""
+        if not pin:
+            continue
+        name = parts[1].strip() if len(parts) > 1 else ""
+        connection = parts[2].strip() if len(parts) > 2 else ""
+        if name:
+            pin_names[pin] = name
+        if connection:
+            pin_connections[pin] = connection
+    return pin_names, pin_connections
+
+
+def connector_pin_table_text(connector: ConnectorInstance) -> str:
+    pin_names = _clean_text_map(getattr(connector, "pin_names", {}))
+    pin_connections = _clean_text_map(getattr(connector, "pin_connections", {}))
+    base_pins = [connector_pin_label(index, connector.pin_labels) for index in range(max(1, connector.pin_count))]
+    extra_pins = sorted((set(pin_names) | set(pin_connections)) - set(base_pins))
+    lines = []
+    for pin in base_pins + extra_pins:
+        name = pin_names.get(pin, "")
+        connection = pin_connections.get(pin, "")
+        if name or connection or pin in base_pins:
+            lines.append(f"{pin}; {name}; {connection}")
+    return "\n".join(lines)
+
+
+def _parse_part_number_quantity(raw: str) -> Tuple[str, float]:
+    """Ondersteun ``PN x2`` of ``2x PN`` voor vaste accessoire-aantallen."""
+    text = str(raw or "").strip()
+    if not text:
+        return "", 0.0
+    qty_first = re.fullmatch(r"(?P<qty>\d+(?:[.,]\d+)?)\s*[xX]\s+(?P<part>.+)", text)
+    qty_last = re.fullmatch(r"(?P<part>.+?)(?:\s+[xX]\s*|\s*[xX]\s+)(?P<qty>\d+(?:[.,]\d+)?)", text)
+    match = qty_first or qty_last
+    if not match:
+        return text, 1.0
+    part = match.group("part").strip()
+    try:
+        qty = float(match.group("qty").replace(",", "."))
+    except (TypeError, ValueError):
+        qty = 1.0
+    return part, max(0.0, qty)
+
+
+def _connector_wire_refs(connector: ConnectorInstance, wires: List["WirePath"]) -> Dict[str, List[Tuple["WirePath", str, str]]]:
+    connector_id = connector.connector_id.strip().upper()
+    refs: Dict[str, List[Tuple["WirePath", str, str]]] = {}
+    for wire in wires:
+        from_ref = wire.from_connector.strip().upper()
+        to_ref = wire.to_connector.strip().upper()
+        if from_ref == connector_id and wire.from_pin.strip():
+            other_ref = wire.to_node or wire.to_connector
+            other_pin = "" if wire.to_node else wire.to_pin
+            refs.setdefault(wire.from_pin.strip(), []).append((wire, other_ref, other_pin))
+        if to_ref == connector_id and wire.to_pin.strip():
+            other_ref = wire.from_node or wire.from_connector
+            other_pin = "" if wire.from_node else wire.from_pin
+            refs.setdefault(wire.to_pin.strip(), []).append((wire, other_ref, other_pin))
+    return refs
+
+
+CONNECTOR_PINOUT_CSV_HEADER = [
+    "Connector",
+    "Connector part",
+    "Pin",
+    "Benaming",
+    "Connectie",
+    "Draad ID",
+    "Signaal",
+    "Net",
+    "Tegenconnector/knoop",
+    "Tegenpin",
+]
 NETLIST_CSV_HEADER = [
     "Wire ID",
     "Signaal",
@@ -290,6 +414,51 @@ NETLIST_CSV_HEADER = [
     "Draadtype",
 ]
 BOM_CSV_HEADER = ["Type", "Omschrijving", "Aantal", "Totale lengte mm"]
+
+
+def connector_pinout_rows(connectors: List[ConnectorInstance], wires: List[WirePath]) -> List[List[object]]:
+    rows: List[List[object]] = []
+    for connector in sorted(connectors, key=lambda c: c.connector_id):
+        pin_names = _clean_text_map(getattr(connector, "pin_names", {}))
+        pin_connections = _clean_text_map(getattr(connector, "pin_connections", {}))
+        wire_refs = _connector_wire_refs(connector, wires)
+        base_pins = [connector_pin_label(index, connector.pin_labels) for index in range(max(1, connector.pin_count))]
+        extra_pins = sorted((set(pin_names) | set(pin_connections) | set(wire_refs)) - set(base_pins))
+        for pin in base_pins + extra_pins:
+            refs = wire_refs.get(pin, [])
+            if not refs:
+                rows.append(
+                    [
+                        connector.connector_id,
+                        connector.part_number,
+                        pin,
+                        pin_names.get(pin, ""),
+                        pin_connections.get(pin, ""),
+                        "",
+                        "",
+                        "",
+                        "",
+                        "",
+                    ]
+                )
+                continue
+            for wire, other_ref, other_pin in refs:
+                derived_connection = f"{other_ref}:{other_pin}" if other_pin else other_ref
+                rows.append(
+                    [
+                        connector.connector_id,
+                        connector.part_number,
+                        pin,
+                        pin_names.get(pin, ""),
+                        pin_connections.get(pin, "") or derived_connection,
+                        wire.wire_id,
+                        wire.signal_name,
+                        wire.net_name,
+                        other_ref,
+                        other_pin,
+                    ]
+                )
+    return rows
 
 
 def wire_netlist_rows(wires: List[WirePath]) -> List[List[object]]:
@@ -342,6 +511,56 @@ def wire_bom_rows(wires: List[WirePath]) -> List[List[object]]:
                 f"{values['length']:.1f}",
             ]
         )
+    return rows
+
+
+def connector_populated_pin_count(connector: ConnectorInstance, wires: List[WirePath]) -> int:
+    used_pins = set(_connector_wire_refs(connector, wires))
+    pin_names = _clean_text_map(getattr(connector, "pin_names", {}))
+    pin_connections = _clean_text_map(getattr(connector, "pin_connections", {}))
+    for pin in set(pin_names) | set(pin_connections):
+        if pin_names.get(pin) or pin_connections.get(pin):
+            used_pins.add(pin)
+    return len(used_pins)
+
+
+def _format_quantity(value: float):
+    if abs(value - round(value)) < 1e-9:
+        return int(round(value))
+    return f"{value:g}"
+
+
+def connector_bom_rows(connectors: List[ConnectorInstance], wires: List[WirePath]) -> List[List[object]]:
+    groups: Dict[Tuple[str, str], Dict[str, object]] = {}
+
+    def add_part(kind: str, part_text: str, qty: float, connector_id: str):
+        part_number, entry_qty = _parse_part_number_quantity(part_text)
+        total_qty = qty * entry_qty
+        if not part_number or total_qty <= 0:
+            return
+        key = (kind, part_number)
+        group = groups.setdefault(key, {"qty": 0.0, "refs": []})
+        group["qty"] = float(group["qty"]) + total_qty
+        refs = group["refs"]
+        if isinstance(refs, list) and connector_id not in refs:
+            refs.append(connector_id)
+
+    for connector in connectors:
+        connector_id = connector.connector_id
+        add_part("Connector", connector.part_number, 1.0, connector_id)
+        for part in getattr(connector, "mating_part_numbers", []):
+            add_part("Mating connector", part, 1.0, connector_id)
+        populated_pin_count = connector_populated_pin_count(connector, wires)
+        for part in getattr(connector, "terminal_part_numbers", []):
+            add_part("Terminal", part, float(populated_pin_count), connector_id)
+        for part in getattr(connector, "accessory_part_numbers", []):
+            add_part("Accessoire", part, 1.0, connector_id)
+
+    rows: List[List[object]] = []
+    for (kind, part_number), values in sorted(groups.items()):
+        refs = values.get("refs", [])
+        ref_text = f" ({', '.join(refs)})" if isinstance(refs, list) and refs else ""
+        rows.append([kind, f"{part_number}{ref_text}", _format_quantity(float(values["qty"])), ""])
     return rows
 
 
