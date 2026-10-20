@@ -33,7 +33,18 @@ public static class HarnessRouteOperations
             throw new InvalidOperationException("Kies een aaneengesloten reeks verschillende routetakken. De fysieke eindpunten van opeenvolgende takken moeten aansluiten.");
         var before = conductor.BranchIds.ToList();
         var after = orderedBranchIds.ToList();
-        return new DelegateCommand("Aderroute wijzigen", () => conductor.BranchIds = [.. after], () => conductor.BranchIds = [.. before]);
+        var staleShapes = project.Sheets.SelectMany(s => s.Views).SelectMany(v => v.WirePresentations)
+            .Where(p => p.ConductorId == conductor.Id)
+            .SelectMany(p => p.Routes.Where(r => !after.Contains(r.BranchId)).Select(r => (Presentation: p, Route: r, Index: p.Routes.IndexOf(r)))).ToArray();
+        return new DelegateCommand("Aderroute wijzigen", () =>
+        {
+            conductor.BranchIds = [.. after];
+            foreach (var shape in staleShapes) shape.Presentation.Routes.Remove(shape.Route);
+        }, () =>
+        {
+            conductor.BranchIds = [.. before];
+            foreach (var shape in staleShapes) shape.Presentation.Routes.Insert(Math.Min(shape.Index, shape.Presentation.Routes.Count), shape.Route);
+        });
     }
 
     public static IEditCommand AddConductor(HarnessProject project, Conductor conductor)
@@ -68,7 +79,7 @@ public static class HarnessRouteOperations
         if (project.Assembly.Materials.Concat(project.Assembly.Connectors.SelectMany(c => c.Accessories)).Any(m => m.BranchId == branch.Id) ||
             project.Sheets.SelectMany(s => s.Views).SelectMany(v => v.Annotations).Any(a => a.EntityId == branch.Id))
             throw new InvalidOperationException("Deze tak heeft gekoppeld materiaal of maatvoering. Ontkoppel of verdeel die koppelingen eerst expliciet; splitsen mag hun betekenis niet stilzwijgend veranderen.");
-        var sourcePoints = Geometry.Flatten(sourceRoute.Points, sourceRoute.Smooth).ToList();
+        var sourcePoints = Geometry.Flatten(sourceRoute).ToList();
         var splitIndex = 0;
         for (var control = 1; control <= vertexIndex; control++)
         {
@@ -90,10 +101,16 @@ public static class HarnessRouteOperations
         if (sourceView.Mode == LayoutMode.Scaled && Math.Abs(sourceLength - branch.PhysicalLengthMm) > Geometry.LengthToleranceMm)
             throw new InvalidOperationException("De route op schaal moet eerst overeenkomen met de fysieke maat.");
         var physicalFraction = firstLength / branch.PhysicalLengthMm;
-        var canonical = SplitPolyline(Geometry.Flatten(branch.Points, branch.Smooth),
+        var canonical = SplitPolyline(Geometry.Flatten(branch),
             sourceView.Mode == LayoutMode.Scaled ? physicalFraction : displayFraction);
         var first = new RouteBranch { Name = branch.Name + " · 1", Points = canonical.Left, PhysicalLengthMm = firstLength, LengthLocked = branch.LengthLocked };
         var second = new RouteBranch { Name = branch.Name + " · 2", Points = canonical.Right, PhysicalLengthMm = branch.PhysicalLengthMm - firstLength, LengthLocked = branch.LengthLocked };
+        if (branch.Geometry is { } branchGeometry)
+        {
+            var split = Geometry.SplitAtLengthFraction(branchGeometry, sourceView.Mode == LayoutMode.Scaled ? physicalFraction : displayFraction);
+            first.Geometry = split.Left; first.Points = split.Left.Knots.Select(k => k.Position).ToList(); first.Smooth = split.Left.Segments.Any(s => s.Kind == RouteSegmentKind.Cubic);
+            second.Geometry = split.Right; second.Points = split.Right.Knots.Select(k => k.Position).ToList(); second.Smooth = split.Right.Segments.Any(s => s.Kind == RouteSegmentKind.Cubic);
+        }
         var commands = new List<IEditCommand> { ReplaceWithPair(project.Assembly.Branches, branch, first, second, "Fysieke tak splitsen") };
         foreach (var wire in project.Assembly.Conductors.Where(w => w.BranchIds.Contains(branch.Id)))
         {
@@ -105,14 +122,31 @@ public static class HarnessRouteOperations
         foreach (var view in project.Sheets.SelectMany(s => s.Views))
             foreach (var route in view.Routes.Where(r => r.BranchId == branch.Id).ToArray())
             {
-                var flattened = Geometry.Flatten(route.Points, route.Smooth);
+                var flattened = Geometry.Flatten(route);
                 if (view.Mode == LayoutMode.Scaled && Math.Abs(Geometry.Length(flattened) - branch.PhysicalLengthMm) > Geometry.LengthToleranceMm)
                     throw new InvalidOperationException("Een ander aanzicht op schaal wijkt af van de fysieke maat. Herstel dat aanzicht vóór het splitsen.");
                 var split = route == sourceRoute ? (Left: leftSource, Right: rightSource) :
                     SplitPolyline(flattened, view.Mode == LayoutMode.Scaled ? physicalFraction : displayFraction);
                 var firstRoute = new PlacedRoute { BranchId = first.Id, Points = split.Left, LayerId = route.LayerId };
                 var secondRoute = new PlacedRoute { BranchId = second.Id, Points = split.Right, LayerId = route.LayerId };
+                if (route.Geometry is { } routeGeometry)
+                {
+                    var curveSplit = route == sourceRoute ? Geometry.SplitAtKnot(routeGeometry, vertexIndex) :
+                        Geometry.SplitAtLengthFraction(routeGeometry, view.Mode == LayoutMode.Scaled ? physicalFraction : displayFraction);
+                    firstRoute.Geometry = curveSplit.Left; firstRoute.Points = curveSplit.Left.Knots.Select(k => k.Position).ToList(); firstRoute.Smooth = curveSplit.Left.Segments.Any(s => s.Kind == RouteSegmentKind.Cubic);
+                    secondRoute.Geometry = curveSplit.Right; secondRoute.Points = curveSplit.Right.Knots.Select(k => k.Position).ToList(); secondRoute.Smooth = curveSplit.Right.Segments.Any(s => s.Kind == RouteSegmentKind.Cubic);
+                }
                 commands.Add(ReplaceWithPair(view.Routes, route, firstRoute, secondRoute, "Takweergave splitsen"));
+            }
+        foreach (var view in project.Sheets.SelectMany(s => s.Views))
+            foreach (var presentation in view.WirePresentations)
+            {
+                var original = presentation.Routes.Find(r => r.BranchId == branch.Id);
+                if (original is null) continue;
+                var split = Geometry.SplitAtLengthFraction(original.Geometry, displayFraction);
+                commands.Add(ReplaceWithPair(presentation.Routes, original,
+                    new WireRouteGeometry { BranchId = first.Id, Geometry = split.Left },
+                    new WireRouteGeometry { BranchId = second.Id, Geometry = split.Right }, "Afzonderlijke adervorm splitsen"));
             }
         return new CompositeCommand("Fysieke routetak splitsen", commands.ToArray());
     }

@@ -60,6 +60,45 @@ internal sealed class PropertyForm
         Panel.Children.Add(box); return box;
     }
     public TextBox Number(string label, double value) => Text(label, EditData.Format(value));
+    public TextBox Color(string label, string value)
+    {
+        var field = Text(label, value);
+        var swatches = new WrapPanel { Margin = new(0, 0, 0, 6) };
+        foreach (var color in new[] { "#000000", "#FFFFFF", "#DC2626", "#2563EB", "#16A34A", "#EAB308", "#F97316", "#9333EA", "#6B7280", "#1F4E79" })
+        {
+            var button = new Button { Width = 23, Height = 24, Padding = new(0), Margin = new(1), ToolTip = color,
+                Background = (SolidColorBrush)new BrushConverter().ConvertFromString(color)! };
+            System.Windows.Automation.AutomationProperties.SetName(button, $"Kleur {color}");
+            button.Click += (_, _) => field.Text = color;
+            swatches.Children.Add(button);
+        }
+        Panel.Children.Add(swatches);
+        Action("Kleur kiezen…", () =>
+        {
+            var owner = Window.GetWindow(Panel);
+            if (owner is null) return;
+            var dialog = new FormDialog(owner, "Tekenkleur kiezen", 380);
+            var initial = Colors.Black;
+            try { initial = (Color)ColorConverter.ConvertFromString(field.Text); } catch (FormatException) { }
+            var preview = new Border { Height = 45, Margin = new(0, 8, 0, 8) };
+            Slider Channel(string title, byte value)
+            {
+                dialog.Form.Label(title);
+                var slider = new Slider { Minimum = 0, Maximum = 255, Value = value, TickFrequency = 1, IsSnapToTickEnabled = true, Margin = new(0, 6, 0, 12) };
+                System.Windows.Automation.AutomationProperties.SetName(slider, title);
+                dialog.Form.Panel.Children.Add(slider);
+                return slider;
+            }
+            var red = Channel("Rood", initial.R); var green = Channel("Groen", initial.G); var blue = Channel("Blauw", initial.B);
+            string Value() => $"#{(int)red.Value:X2}{(int)green.Value:X2}{(int)blue.Value:X2}";
+            void Update() => preview.Background = new SolidColorBrush(System.Windows.Media.Color.FromRgb((byte)red.Value, (byte)green.Value, (byte)blue.Value));
+            red.ValueChanged += (_, _) => Update(); green.ValueChanged += (_, _) => Update(); blue.ValueChanged += (_, _) => Update();
+            dialog.Form.Panel.Children.Add(preview); Update();
+            dialog.OnAccept = () => { field.Text = Value(); return true; };
+            dialog.ShowDialog();
+        });
+        return field;
+    }
     public ComboBox Choice<T>(string label, IEnumerable<T> items, T? selected = default, Func<T, string>? display = null)
     {
         Label(label);
@@ -92,7 +131,7 @@ internal sealed class PropertyForm
         {
             if (CanApply?.Invoke() == false) return;
             try { action(); }
-            catch (Exception ex) { MessageBox.Show(ex.Message, "Bewerking niet toegepast", MessageBoxButton.OK, MessageBoxImage.Warning); }
+            catch (Exception ex) { if (App.IsBackgroundAcceptance) throw; MessageBox.Show(ex.Message, "Bewerking niet toegepast", MessageBoxButton.OK, MessageBoxImage.Warning); }
         };
         Panel.Children.Add(button);
     }

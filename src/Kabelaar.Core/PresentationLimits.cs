@@ -11,6 +11,7 @@ public static class PresentationLimits
 
     public static bool ValidDisplayScale(double value) => Positive(value, MaximumDisplayScale);
     public static bool ValidFontSize(double value) => Positive(value, MaximumFontSizeMm);
+    public static bool ValidLineWidth(double value) => Positive(value, MaximumLineWidthMm);
     public static bool ValidStyle(DrawingStyle style) =>
         Positive(style.WireLineWidthMm, MaximumLineWidthMm) &&
         ValidFontSize(style.WireLabelFontSizeMm) &&

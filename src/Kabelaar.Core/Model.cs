@@ -20,7 +20,7 @@ public enum TwistDisplayMode { Full, Markers, Parallel }
 
 public sealed class HarnessProject
 {
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Id { get; set; } = Ids.New();
     public string Title { get; set; } = "Nieuwe kabelboom";
@@ -150,6 +150,8 @@ public sealed class RouteBranch
     public string Name { get; set; } = "";
     public List<Point2> Points { get; set; } = [];
     public bool Smooth { get; set; }
+    /// <summary>Null retains the legacy Points/Smooth geometry without resampling.</summary>
+    public RouteGeometry? Geometry { get; set; }
     public double PhysicalLengthMm { get; set; }
     public bool LengthLocked { get; set; }
 }
@@ -212,6 +214,7 @@ public sealed class DrawingView
     public DrawingStyle Style { get; set; } = new();
     public List<PlacedComponent> Components { get; set; } = [];
     public List<PlacedRoute> Routes { get; set; } = [];
+    public List<WirePresentation> WirePresentations { get; set; } = [];
     public List<Annotation> Annotations { get; set; } = [];
 }
 /// <summary>Presentation settings only; none of these values determine production lengths or twist specifications.</summary>
@@ -252,7 +255,58 @@ public sealed class PlacedRoute
     public string BranchId { get; set; } = "";
     public List<Point2> Points { get; set; } = [];
     public bool Smooth { get; set; }
+    public RouteGeometry? Geometry { get; set; }
     public string LayerId { get; set; } = "main";
+}
+public enum RouteSegmentKind { Line, Cubic }
+public enum TangentMode { Independent, Aligned, Mirrored }
+public enum EndpointMoveMode { KeepConnection, MoveConnectedNode, DetachThisEndpoint }
+
+/// <summary>Geometry identities are scoped to this route and remain stable through edits and undo.</summary>
+public sealed class RouteGeometry
+{
+    public List<RouteKnot> Knots { get; set; } = [];
+    public List<RouteSegment> Segments { get; set; } = [];
+    public RouteGeometry Copy() => new()
+    {
+        Knots = Knots.Select(k => k.Copy()).ToList(),
+        Segments = Segments.Select(s => s.Copy()).ToList()
+    };
+}
+public sealed class RouteKnot
+{
+    public string Id { get; set; } = Ids.New();
+    public Point2 Position { get; set; }
+    public Point2 InHandle { get; set; }
+    public Point2 OutHandle { get; set; }
+    public TangentMode TangentMode { get; set; } = TangentMode.Aligned;
+    public RouteKnot Copy() => (RouteKnot)MemberwiseClone();
+}
+public sealed class RouteSegment
+{
+    public string Id { get; set; } = Ids.New();
+    public string StartKnotId { get; set; } = "";
+    public string EndKnotId { get; set; } = "";
+    public RouteSegmentKind Kind { get; set; }
+    /// <summary>Retain deliberately edited collinear handles when toggling between straight and curved.</summary>
+    public bool HasCurveHandles { get; set; }
+    public RouteSegment Copy() => (RouteSegment)MemberwiseClone();
+}
+public sealed class WirePresentation
+{
+    public string ConductorId { get; set; } = "";
+    public double? LineWidthMm { get; set; }
+    public List<WireRouteGeometry> Routes { get; set; } = [];
+    public WirePresentation Copy() => new()
+    {
+        ConductorId = ConductorId, LineWidthMm = LineWidthMm,
+        Routes = Routes.Select(r => new WireRouteGeometry { BranchId = r.BranchId, Geometry = r.Geometry.Copy() }).ToList()
+    };
+}
+public sealed class WireRouteGeometry
+{
+    public string BranchId { get; set; } = "";
+    public RouteGeometry Geometry { get; set; } = new();
 }
 public sealed class Annotation
 {

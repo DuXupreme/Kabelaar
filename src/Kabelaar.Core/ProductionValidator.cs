@@ -166,6 +166,7 @@ public static class ProductionValidator
         foreach (var branch in assembly.Branches)
         {
             if (branch.Points.Count < 2) Error("branch.geometry", branch.Id, "Een fysieke route vereist minstens twee punten.", true);
+            ValidateCurve(branch.Geometry, branch.Points, branch.Id);
             if (branch.PhysicalLengthMm <= 0) Error("branch.length", branch.Id, "Fysieke taklengte moet groter zijn dan nul.");
         }
         foreach (var group in assembly.TwistGroups)
@@ -199,6 +200,25 @@ public static class ProductionValidator
                 if (view.Scale <= 0) Error("view.scale", view.Id, "Aanzichtschaal moet positief zijn.", true);
                 if (!PresentationLimits.ValidStyle(view.Style))
                     Error("view.style", view.Id, "De tekenstijl bevat een ongeldige lijndikte, letterhoogte of twistweergave.", true);
+                if (view.WirePresentations.Select(p => p.ConductorId).Distinct().Count() != view.WirePresentations.Count)
+                    Error("wirePresentation.duplicate", view.Id, "Een ader heeft meerdere weergave-instellingen in hetzelfde aanzicht.", true);
+                foreach (var presentation in view.WirePresentations)
+                {
+                    var wire = assembly.Conductors.Find(w => w.Id == presentation.ConductorId);
+                    if (wire is null) Error("wirePresentation.conductor", view.Id, "Aderweergave verwijst naar een onbekende ader.", true);
+                    if (presentation.LineWidthMm is { } width && !PresentationLimits.ValidLineWidth(width))
+                        Error("wirePresentation.width", presentation.ConductorId, "Aderlijndikte moet groter dan 0 en maximaal 1000 mm zijn.", true);
+                    if (view.Mode == LayoutMode.Scaled && presentation.Routes.Count != 0)
+                        Error("wirePresentation.scaled", presentation.ConductorId, "Afzonderlijke adervormen vereisen vrije opmaak.", true);
+                    if (presentation.Routes.Select(r => r.BranchId).Distinct().Count() != presentation.Routes.Count)
+                        Error("wirePresentation.duplicateRoute", presentation.ConductorId, "Een adervorm bevat een routetak meermaals.", true);
+                    foreach (var geometry in presentation.Routes)
+                    {
+                        if (wire is null || !wire.BranchIds.Contains(geometry.BranchId) || !view.Routes.Any(r => r.BranchId == geometry.BranchId))
+                            Error("wirePresentation.route", presentation.ConductorId, "Adervorm verwijst naar een onbekende of niet gebruikte routetak.", true);
+                        ValidateCurve(geometry.Geometry, null, presentation.ConductorId);
+                    }
+                }
                 foreach (var placement in view.Components)
                 {
                     if (!PresentationLimits.ValidDisplayScale(placement.DisplayScale) || !PresentationLimits.ValidFontSize(placement.LabelFontSizeMm))
@@ -212,9 +232,10 @@ public static class ProductionValidator
                 foreach (var route in view.Routes)
                 {
                     if (!branches.TryGetValue(route.BranchId, out var branch)) Error("route.branch", route.Id, "Aanzicht verwijst naar een onbekende tak.", true);
-                    else if (view.Mode == LayoutMode.Scaled && Math.Abs(Geometry.Length(route.Points, route.Smooth) - branch.PhysicalLengthMm) > Geometry.LengthToleranceMm)
+                    else if (view.Mode == LayoutMode.Scaled && !HasInvalidCurve(route.Geometry) && Math.Abs(Geometry.Length(route) - branch.PhysicalLengthMm) > Geometry.LengthToleranceMm)
                         Error("route.scaleMismatch", route.Id, "De getekende routelengte komt niet overeen met de fysieke maat.");
                     if (route.Points.Count < 2) Error("route.geometry", route.Id, "Een getekende route vereist minstens twee punten.", true);
+                    ValidateCurve(route.Geometry, route.Points, route.Id);
                     if (!layerIds.Contains(route.LayerId)) Error("route.layer", route.Id, "Route staat op een onbekende laag.", true);
                 }
                 if (view.Mode == LayoutMode.Scaled)
@@ -274,6 +295,21 @@ public static class ProductionValidator
             }
         }
         return issues;
+
+        void ValidateCurve(RouteGeometry? geometry, IReadOnlyList<Point2>? points, string owner)
+        {
+            if (geometry is null) return;
+            if (HasInvalidCurve(geometry)) { Error("route.curve", owner, "De curve bevat ongeldige knopen, handvatten of segmentverwijzingen.", true); return; }
+            if (points is not null && (geometry.Knots.Count != points.Count || geometry.Knots.Where((k, i) => k.Position != points[i]).Any()))
+                Error("route.curvePoints", owner, "Curveknopen en routepunten komen niet overeen.", true);
+        }
+    }
+
+    private static bool HasInvalidCurve(RouteGeometry? geometry)
+    {
+        if (geometry is null) return false;
+        try { Geometry.ValidateRouteGeometry(geometry); return false; }
+        catch (ArgumentException) { return true; }
     }
 
     private static void ValidateShape(HarnessProject project, List<ValidationIssue> issues)
@@ -358,9 +394,27 @@ public static class ProductionValidator
                     return;
                 case RouteBranch branch:
                     Identity(branch.Id, owner); Required(branch.Name, branch.Id); Points(branch.Points, branch.Id); Number(branch.PhysicalLengthMm, branch.Id);
+                    if (branch.Geometry is not null) Walk(branch.Geometry, branch.Id, depth + 1);
                     return;
                 case PlacedRoute route:
                     Identity(route.Id, owner); Required(route.BranchId, route.Id); Required(route.LayerId, route.Id); Points(route.Points, route.Id);
+                    if (route.Geometry is not null) Walk(route.Geometry, route.Id, depth + 1);
+                    return;
+                case RouteGeometry geometry:
+                    // Knot/segment identities are local to a route, and intentionally copied into its physical and view representations.
+                    if (geometry.Knots is null || geometry.Segments is null) Walk(null, owner, depth + 1);
+                    else if (geometry.Knots.Any(k => k is null) || geometry.Segments.Any(s => s is null)) Walk(null, owner, depth + 1);
+                    else
+                    {
+                        foreach (var knot in geometry.Knots)
+                        {
+                            Required(knot.Id, owner); EnumValue(knot.TangentMode, owner);
+                            if (!Geometry.IsFinite(knot.Position) || !Geometry.IsFinite(knot.InHandle) || !Geometry.IsFinite(knot.OutHandle))
+                                issues.Add(new(Severity.Error, "data.nonfinite", owner, "Een bochthandvat is niet eindig.", true));
+                        }
+                        foreach (var segment in geometry.Segments)
+                        { Required(segment.Id, owner); Required(segment.StartKnotId, owner); Required(segment.EndKnotId, owner); EnumValue(segment.Kind, owner); }
+                    }
                     return;
                 case PlacedComponent component:
                     Identity(component.Id, owner); Required(component.EntityId, component.Id); Required(component.LayerId, component.Id);

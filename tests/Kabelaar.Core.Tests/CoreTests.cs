@@ -279,14 +279,32 @@ public sealed class CoreTests
     }
 
     [Fact]
-    public void ScaledChangePreservesOtherViewsLayoutAndReportsItsMismatch()
+    public void ScaledChangeRejectsAConflictWithAnotherScaledViewWithoutMutatingAnything()
     {
         var (project, view, route, _) = Scaled();
         var siblingRoute = new PlacedRoute { BranchId = route.BranchId, Points = [new(10, 10), new(110, 10)] };
         project.Sheets[0].Views.Add(new DrawingView { Routes = [siblingRoute] });
         var history = new CommandHistory();
-        history.Execute(HarnessOperations.SetRoutePoints(project, view, route, [new(0, 0), new(200, 0)]));
+        var originalLength = project.Assembly.Branches[0].PhysicalLengthMm;
+        var originalPoints = route.Points.ToArray();
+        var originalToken = history.StateToken;
+        Assert.Throws<InvalidOperationException>(() =>
+            history.Execute(HarnessOperations.SetRoutePoints(project, view, route, [new(0, 0), new(200, 0)])));
         Assert.Equal(new Point2(110, 10), siblingRoute.Points[^1]);
+        Assert.Equal(originalPoints, route.Points);
+        Assert.Equal(originalLength, project.Assembly.Branches[0].PhysicalLengthMm);
+        Assert.Equal(originalToken, history.StateToken);
+        Assert.False(history.IsDirty);
+        Assert.False(history.CanUndo);
+        Assert.DoesNotContain(ProductionValidator.Validate(project), i => i.Code == "route.scaleMismatch");
+    }
+
+    [Fact]
+    public void AnImportedScaledViewMismatchIsStillReported()
+    {
+        var (project, view, route, _) = Scaled();
+        var siblingRoute = new PlacedRoute { BranchId = route.BranchId, Points = [new(10, 10), new(210, 10)] };
+        project.Sheets[0].Views.Add(new DrawingView { Routes = [siblingRoute] });
         Assert.Contains(ProductionValidator.Validate(project), i => i.Code == "route.scaleMismatch" && i.EntityId == siblingRoute.Id);
     }
 

@@ -39,6 +39,8 @@ public partial class MainWindow
             _history.Undo();
             await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
             await CheckPresentationEditingAsync(Check);
+            await CheckRestoredEditingAsync(output, Check);
+            await CheckGeometryMovesAsync(Check);
             var wire = _project.Assembly.Conductors[0];
             Canvas.Select(wire.Id);
             Check(WireGrid.SelectedItem is WireDisplay row && row.Id == wire.Id, "Tekeningselectie koppelt naar aansluitlijst");
@@ -110,6 +112,7 @@ public partial class MainWindow
             var embeddedPreview = await ImportEmbeddedStepPreviewAsync(reopenedAsset, CancellationToken.None);
             Check(embeddedPreview.Views.Count == 6 && embeddedPreview.Mesh.Triangles.Count == imported.Mesh.Triangles.Count,
                 "STEP-preview heropent uit projectasset zonder oorspronkelijk bronpad");
+            await CheckExampleProjectAsync(args, Check);
             if (args.Contains("--functional-smoke"))
             {
                 var functionalReport = new
@@ -168,12 +171,13 @@ public partial class MainWindow
             Check(true, "Alle 110 connectorbewerkingen verschijnen in nieuwe frames; 10 opwarmmetingen en 100 meetwaarden");
             var p95 = frames.Length > 0 ? frames[(int)Math.Ceiling(frames.Length * .95) - 1] : double.PositiveInfinity;
             var editP95 = editing.OrderBy(x => x).ElementAt((int)Math.Ceiling(editing.Count * .95) - 1);
+            var curvePreview = await MeasureCurvePreviewAsync(Check);
             var report = new { utc = DateTimeOffset.UtcNow, version = typeof(MainWindow).Assembly.GetName().Version?.ToString(),
                 scope = "full", performanceMeasured = true,
                 checks, rendering = new { frames = frames.Length, p95Milliseconds = p95, targetMilliseconds = 33, passes = p95 <= 33 },
                 editing = new { samples = editing.Count, warmupSamples = coldEditing.Count, coldMilliseconds = coldEditing,
                     p95Milliseconds = editP95, targetMilliseconds = 100, passes = editP95 <= 100 },
-                editDetails,
+                editDetails, curvePreview,
                 lastRefreshMilliseconds = new Dictionary<string, double>(_refreshTimings),
                 reference = new { os = Environment.OSVersion.ToString(), processors = Environment.ProcessorCount,
                     memoryBytes = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes,

@@ -11,15 +11,17 @@ public static partial class SceneBuilder
     private const string Ink = "#243244";
     private const string Muted = "#6C7A86";
     private const string Accent = "#137F8B";
-    private sealed class RouteGeometry
+    private sealed class LegacyRouteGeometry
     {
         public Point2[] Original = [];
         public bool Smooth;
         public IReadOnlyList<Point2> Flattened = [];
     }
-    private static readonly ConditionalWeakTable<PlacedRoute, RouteGeometry> RouteGeometryCache = new();
+    private static readonly ConditionalWeakTable<PlacedRoute, LegacyRouteGeometry> RouteGeometryCache = new();
     private static IReadOnlyList<Point2> FlattenRoute(PlacedRoute route, RouteBranch? branch)
     {
+        if ((route.Geometry ?? (route.Points.Count == 0 ? branch?.Geometry : null)) is { } geometry)
+            return FlattenExplicitRoute(geometry);
         var points = route.Points.Count > 0 ? route.Points : branch?.Points ?? [];
         var smooth = route.Smooth || (branch?.Smooth ?? false);
         var cached = RouteGeometryCache.GetOrCreateValue(route);
@@ -94,6 +96,7 @@ public static partial class SceneBuilder
                 primitives.Add(primitive with { ViewId = view.Id, LayerId = layer, Locked = primitive.Locked || Locked(layer), PlacementId = placementId });
             }
             var routePlacements = FirstById(view.Routes, r => r.BranchId);
+            var wirePresentations = FirstById(view.WirePresentations, p => p.ConductorId);
             var flattenedRoutes = routePlacements.ToDictionary(pair => pair.Key, pair =>
             {
                 var branch = branches.GetValueOrDefault(pair.Key); var route = pair.Value;
@@ -120,15 +123,32 @@ public static partial class SceneBuilder
                 && endpointPositions.TryGetValue((entity, endpoint.Kind == EndpointKind.Splice ? null : endpoint.CavityId), out var point) ? point : null;
             Checkpoint("endpoints");
             var wirePaths = new Dictionary<string, IReadOnlyList<Point2>>(conductors.Count);
+            var baselineWirePaths = new Dictionary<string, IReadOnlyList<Point2>>();
+            var individuallyShaped = new HashSet<string>();
             foreach (var wire in conductors.Values)
-                wirePaths.Add(wire.Id, ResolveConductorPoints(wire, EndpointPoint(wire.From), EndpointPoint(wire.To), flattenedRoutes));
+            {
+                var start = EndpointPoint(wire.From); var end = EndpointPoint(wire.To);
+                var baseline = ResolveConductorPoints(wire, start, end, flattenedRoutes);
+                if (view.Mode == LayoutMode.Free && wirePresentations.TryGetValue(wire.Id, out var presentation) &&
+                    presentation.Routes.Any(r => wire.BranchIds.Contains(r.BranchId) && routePlacements.ContainsKey(r.BranchId)))
+                {
+                    individuallyShaped.Add(wire.Id);
+                    baselineWirePaths.Add(wire.Id, baseline);
+                    wirePaths.Add(wire.Id, ResolveConductorPoints(wire, start, end,
+                        OverrideRoutes(flattenedRoutes, presentation)));
+                }
+                else wirePaths.Add(wire.Id, baseline);
+            }
             var twistedPaths = new Dictionary<string, IReadOnlyList<Point2>>();
             foreach (var twist in project.Assembly.TwistGroups)
             {
-                var paths = twist.ConductorIds.Where(wirePaths.ContainsKey).Select(id => wirePaths[id]).Where(p => p.Count >= 2).ToArray();
+                var paths = twist.ConductorIds.Where(wirePaths.ContainsKey)
+                    .Select(id => baselineWirePaths.GetValueOrDefault(id) ?? wirePaths[id]).Where(p => p.Count >= 2).ToArray();
                 if (paths.Length != twist.ConductorIds.Count || paths.Length < 2) continue;
                 for (var i = 0; i < twist.ConductorIds.Count; i++)
-                    twistedPaths[twist.ConductorIds[i]] = TwistTogether(paths, i,
+                    twistedPaths[twist.ConductorIds[i]] = TwistTogether(
+                        individuallyShaped.Contains(twist.ConductorIds[i])
+                            ? Enumerable.Repeat(wirePaths[twist.ConductorIds[i]], paths.Length).ToArray() : paths, i,
                         style.TwistDisplayPitchMm > 0 ? style.TwistDisplayPitchMm : twist.PitchMm,
                         style.TwistAmplitudeMm, style.TwistDisplayMode);
             }
@@ -214,12 +234,11 @@ public static partial class SceneBuilder
                     var twist = twistByWire.GetValueOrDefault(wire.Id);
                     if (twistedPaths.TryGetValue(wire.Id, out var twisted))
                         points = twisted;
-                    else if (wireOffsets.TryGetValue(wire.Id, out var offset))
+                    else if (!individuallyShaped.Contains(wire.Id) && wireOffsets.TryGetValue(wire.Id, out var offset))
                         points = Offset(points, offset);
                     var label = labels?.Place(points, view.Origin, scale, WireLabel(wire.Name, wire.ColorCode, wire.CrossSectionMm2),
                         style.WireLabelFontSizeMm * scale) ?? (new Point2(), new Point2());
-                    var lineWidth = style.WireLineWidthMm * (style.UseWireSectionWidth
-                        ? Math.Clamp(Math.Sqrt(Math.Max(0, wire.CrossSectionMm2) / .5), 1, 2) : 1);
+                    var lineWidth = WireLineWidth(style, wire, wirePresentations.GetValueOrDefault(wire.Id));
                     var appearance = new WireAppearance(view.Id, view.Origin, scale, layer, placement?.Id, Locked(layer),
                         wire.Name, wire.ColorCode, wire.Color, wire.CrossSectionMm2, twist is not null,
                         wire.From.Kind == EndpointKind.Free, wire.To.Kind == EndpointKind.Free,
@@ -251,16 +270,19 @@ public static partial class SceneBuilder
     }
 
     /// <summary>Returns display geometry in view mm, resolving real endpoints without altering domain data.</summary>
-    public static IReadOnlyList<Point2> ConductorPoints(HarnessProject project, DrawingView view, Conductor wire)
+    public static IReadOnlyList<Point2> ConductorPoints(HarnessProject project, DrawingView view, Conductor wire,
+        bool useIndividualPresentation = true)
     {
         var start = Geometry.EndpointPosition(project, view, wire.From);
         var end = Geometry.EndpointPosition(project, view, wire.To);
         var routes = view.Routes.GroupBy(r => r.BranchId).ToDictionary(g => g.Key, g =>
         {
             var route = g.First(); var branch = project.Assembly.Branches.Find(b => b.Id == g.Key);
-            return Geometry.Flatten(route.Points.Count > 0 ? route.Points : branch?.Points ?? [], route.Smooth || (branch?.Smooth ?? false));
+            return FlattenRoute(route, branch);
         });
-        return ResolveConductorPoints(wire, start, end, routes);
+        var presentation = useIndividualPresentation && view.Mode == LayoutMode.Free
+            ? view.WirePresentations.Find(p => p.ConductorId == wire.Id) : null;
+        return ResolveConductorPoints(wire, start, end, presentation is null ? routes : OverrideRoutes(routes, presentation));
     }
 
     private static IReadOnlyList<Point2> ResolveConductorPoints(Conductor wire, Point2? start, Point2? end, IReadOnlyDictionary<string, IReadOnlyList<Point2>> routes)
@@ -483,19 +505,20 @@ public static partial class SceneBuilder
         var value = string.IsNullOrWhiteSpace(annotation.Text) ? Number(measurement) : annotation.Text;
         if (!string.IsNullOrWhiteSpace(annotation.Tolerance)) value += " " + annotation.Tolerance;
         var color = annotation.Color;
-        yield return new ScenePath(annotation.Id, "dimension", [a, da, db, b], color, .2 * scale);
-        yield return Arrow(annotation.Id, "dimension", da, db, color, 2 * scale);
-        yield return Arrow(annotation.Id, "dimension", db, da, color, 2 * scale);
+        var lineWidth = annotation.LineWidthMm * scale;
+        yield return new ScenePath(annotation.Id, "dimension", [a, da, db, b], color, lineWidth);
+        yield return Arrow(annotation.Id, "dimension", da, db, color, 2 * scale, lineWidth);
+        yield return Arrow(annotation.Id, "dimension", db, da, color, 2 * scale, lineWidth);
         yield return new SceneText(annotation.Id, "dimension-text", value, (da + db) * .5 + new Point2(0, -1.5), annotation.FontSizeMm * scale, color);
     }
 
-    private static ScenePath Arrow(string id, string category, Point2 tip, Point2 towards, string color, double size)
+    private static ScenePath Arrow(string id, string category, Point2 tip, Point2 towards, string color, double size, double lineWidth = .1)
     {
         var delta = towards - tip; var length = delta.Length;
         var direction = length < 1e-9 ? new Point2(1, 0) : delta * (1 / length);
         var normal = new Point2(-direction.Y, direction.X);
         return new(id, category, [tip, tip + direction * size + normal * (size * .3), tip + direction * size - normal * (size * .3)],
-            color, .1, color, true);
+            color, lineWidth, color, true);
     }
 
     private static IEnumerable<ScenePrimitive> Table(HarnessProject project, Annotation annotation, Point2 origin, double fontSize, double scale)
@@ -504,6 +527,8 @@ public static partial class SceneBuilder
         var columns = annotation.Columns.Count > 0 ? annotation.Columns : defaults;
         if (columns.Count == 0) yield break;
         var width = Math.Max(30, annotation.WidthMm * scale);
+        var lineWidth = annotation.LineWidthMm * scale;
+        var color = annotation.Color;
         static double Weight(string key) => key switch
         {
             "Description" or "Connections" or "References" => 3,
@@ -525,22 +550,22 @@ public static partial class SceneBuilder
             if (row == 0)
                 yield return new ScenePath(annotation.Id, "table-header",
                     [new(origin.X, y), new(origin.X + width, y), new(origin.X + width, y + rowHeight), new(origin.X, y + rowHeight)],
-                    Ink, .25, "#E5ECEE", true);
-            yield return new ScenePath(annotation.Id, "table-grid", [new(origin.X, y), new(origin.X + width, y)], Ink, .15);
+                    color, lineWidth, "#E5ECEE", true);
+            yield return new ScenePath(annotation.Id, "table-grid", [new(origin.X, y), new(origin.X + width, y)], color, lineWidth);
             for (var column = 0; column < columns.Count; column++)
             {
                 for (var line = 0; line < cells[column].Count; line++)
                     yield return new SceneText(annotation.Id, "table-cell", cells[column][line],
                         new(origin.X + offsets[column] + 1, y + 1 + fontSize * (line * 1.35 + 1)),
-                        fontSize, Ink, row == 0, MaxWidthMm: widths[column] - 2);
+                        fontSize, color, row == 0, MaxWidthMm: widths[column] - 2);
             }
             totalHeight += rowHeight;
         }
-        yield return new ScenePath(annotation.Id, "table-grid", [new(origin.X, origin.Y + totalHeight), new(origin.X + width, origin.Y + totalHeight)], Ink, .2);
+        yield return new ScenePath(annotation.Id, "table-grid", [new(origin.X, origin.Y + totalHeight), new(origin.X + width, origin.Y + totalHeight)], color, lineWidth);
         for (var column = 0; column <= columns.Count; column++)
         {
             var x = origin.X + offsets[column];
-            yield return new ScenePath(annotation.Id, "table-grid", [new(x, origin.Y), new(x, origin.Y + totalHeight)], Ink, .15);
+            yield return new ScenePath(annotation.Id, "table-grid", [new(x, origin.Y), new(x, origin.Y + totalHeight)], color, lineWidth);
         }
     }
 

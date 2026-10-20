@@ -12,6 +12,9 @@ namespace Kabelaar.App;
 public enum EditorTool { Select, Connector, Wire, Splice, Text, Dimension, Leader, Line, Arc, Image, WireTable, PinTable, BomTable, RevisionTable }
 public sealed record CanvasClick(Point2 SheetPoint, int Clicks, ModifierKeys Modifiers);
 public sealed record CanvasDrag(Point2 Start, Point2 End, IReadOnlySet<string> Selection);
+public enum GeometryHandleKind { Knot, Incoming, Outgoing }
+public sealed record CanvasGeometryHandle(string? WireId, string RouteId, string KnotId, GeometryHandleKind Kind, Point2 Position, Point2 Origin);
+public sealed record CanvasEditGesture(Point2 Start, Point2 Current, IReadOnlySet<string> Selection, CanvasGeometryHandle? Handle = null);
 
 public sealed class HarnessCanvas : SKElement
 {
@@ -24,6 +27,11 @@ public sealed class HarnessCanvas : SKElement
     private bool _pan;
     private bool _marquee;
     private int _vertexIndex = -1;
+    private CanvasGeometryHandle? _activeHandle;
+    private bool _completingGesture;
+    private DrawingScene? _previewBackground;
+    private IReadOnlyList<ScenePrimitive> _previewPrimitives = [];
+    private readonly ScreenSceneCache _previewCache = new();
     private Point2 _mouse;
     private readonly List<double> _frames = [];
     private readonly ScreenSceneCache _screenCache = new();
@@ -32,6 +40,16 @@ public sealed class HarnessCanvas : SKElement
     public HashSet<string> Selection { get; } = [];
     public List<Point2> PendingPoints { get; } = [];
     public List<Point2> EditableVertices { get; } = [];
+    public List<CanvasGeometryHandle> GeometryHandles { get; } = [];
+    public IReadOnlyList<CanvasGeometryHandle>? PreviewHandles { get; set; }
+    public bool PreviewRejected { get; private set; }
+    public bool HasGeometryPreview => _previewBackground is not null;
+    internal IReadOnlyList<ScenePrimitive> PreviewPrimitives => _previewPrimitives;
+    public double PixelsPerMillimetre => _zoom;
+    public event Action<CanvasEditGesture>? GeometryEditStarted;
+    public event Action<CanvasEditGesture>? GeometryEditUpdated;
+    public event Action<CanvasEditGesture>? GeometryEditCompleted;
+    public event Action? GeometryEditCancelled;
     public bool SnapEnabled { get; set; } = true;
     public double GridSize { get; set; } = 5;
     public Func<Point2, Point2>? SnapProvider { get; set; }
@@ -57,10 +75,30 @@ public sealed class HarnessCanvas : SKElement
         MouseWheel += Wheel;
         SizeChanged += (_, _) => InvalidateVisual();
         MouseLeave += (_, _) => { if (!IsMouseCaptured) { SnapPoint = null; InvalidateVisual(); } };
-        LostMouseCapture += (_, _) => { _pan = false; _dragStart = null; _dragCurrent = null; };
-        Unloaded += (_, _) => _screenCache.Clear();
+        LostMouseCapture += (_, _) =>
+        {
+            if (!_completingGesture) CancelGeometryCapture();
+        };
+        Unloaded += (_, _) => { _screenCache.Clear(); _previewCache.Clear(); GeometryEditCancelled?.Invoke(); };
     }
     public void SetScene(DrawingScene scene) { _scene = scene; InvalidateVisual(); }
+    public void BeginPreview(ISet<string> hiddenEntities)
+    {
+        if (_scene is null) return;
+        _previewBackground = new DrawingScene(_scene.SheetId, _scene.WidthMm, _scene.HeightMm, _scene.IsDraft,
+            _scene.Primitives.Where(p => p.ViewId != ActiveViewId || !hiddenEntities.Contains(p.EntityId)));
+        _previewPrimitives = []; PreviewRejected = false;
+    }
+    public void UpdatePreview(IReadOnlyList<ScenePrimitive> primitives, bool rejected)
+    { _previewPrimitives = primitives; PreviewRejected = rejected; InvalidateVisual(); }
+    public void EndPreview()
+    { _previewBackground = null; _previewPrimitives = []; PreviewHandles = null; PreviewRejected = false; _previewCache.Clear(); InvalidateVisual(); }
+    internal void CancelGeometryCapture()
+    {
+        GeometryEditCancelled?.Invoke();
+        _pan = false; _dragStart = null; _dragCurrent = null; _activeHandle = null; _vertexIndex = -1;
+        InvalidateVisual();
+    }
     public Point2 ToSheet(Point p) => new((p.X - _offset.X) / _zoom, (p.Y - _offset.Y) / _zoom);
     public Point ToScreen(Point2 p) => new(p.X * _zoom + _offset.X, p.Y * _zoom + _offset.Y);
     public void Fit()
@@ -88,7 +126,8 @@ public sealed class HarnessCanvas : SKElement
     }
     public void Cancel()
     {
-        PendingPoints.Clear(); _dragStart = null; _dragCurrent = null;
+        GeometryEditCancelled?.Invoke();
+        PendingPoints.Clear(); _dragStart = null; _dragCurrent = null; _activeHandle = null; _vertexIndex = -1;
         Tool = EditorTool.Select; ReleaseMouseCapture(); InvalidateVisual();
     }
     public Point2 Snap(Point2 p)
@@ -124,6 +163,14 @@ public sealed class HarnessCanvas : SKElement
         var world = ToSheet(p);
         if (Tool != EditorTool.Select)
         { CanvasClicked?.Invoke(new(Snap(world), e.ClickCount, Keyboard.Modifiers)); e.Handled = true; return; }
+        _activeHandle = GeometryHandles.OrderBy(h => h.Kind == GeometryHandleKind.Knot ? 1 : 0)
+            .FirstOrDefault(h => h.Position.DistanceTo(world) * _zoom <= 7);
+        if (_activeHandle is not null)
+        {
+            _dragStart = _activeHandle.Position; _dragCurrent = _dragStart; _marquee = false;
+            CaptureMouse(); GeometryEditStarted?.Invoke(new(_dragStart.Value, _dragStart.Value, new HashSet<string>(Selection), _activeHandle));
+            return;
+        }
         _vertexIndex = EditableVertices.FindIndex(v => v.DistanceTo(world) * _zoom <= 7);
         if (_vertexIndex >= 0)
         {
@@ -150,6 +197,7 @@ public sealed class HarnessCanvas : SKElement
         }
         _dragStart = world; _dragCurrent = world; CaptureMouse();
         SelectionChanged?.Invoke();
+        if (!_marquee && e.ClickCount != 2) GeometryEditStarted?.Invoke(new(world, world, new HashSet<string>(Selection)));
         if (e.ClickCount == 2) CanvasClicked?.Invoke(new(world, 2, Keyboard.Modifiers));
         InvalidateVisual();
     }
@@ -164,7 +212,12 @@ public sealed class HarnessCanvas : SKElement
         _mouse = ToSheet(p);
         PointerMoved?.Invoke(_mouse);
         SnapPoint = Tool == EditorTool.Select ? null : Snap(_mouse);
-        if (_dragStart.HasValue) _dragCurrent = _marquee ? _mouse : _dragStart.Value + (Snap(_mouse) - Snap(_dragStart.Value));
+        if (_dragStart.HasValue)
+        {
+            _dragCurrent = _marquee ? _mouse : _dragStart.Value + (Snap(_mouse) - Snap(_dragStart.Value));
+            if (!_marquee && _vertexIndex < 0)
+                GeometryEditUpdated?.Invoke(new(_dragStart.Value, _dragCurrent.Value, new HashSet<string>(Selection), _activeHandle));
+        }
         if (Tool != EditorTool.Select || _dragStart.HasValue) InvalidateVisual();
     }
     private void PointerUp(object sender, MouseButtonEventArgs e)
@@ -173,7 +226,16 @@ public sealed class HarnessCanvas : SKElement
         if (e.ChangedButton != MouseButton.Left || !_dragStart.HasValue) return;
         var start = _dragStart.Value; var end = _dragCurrent ?? start;
         var vertex = _vertexIndex; _vertexIndex = -1;
-        var marquee = _marquee; _dragStart = null; _dragCurrent = null; ReleaseMouseCapture();
+        var handle = _activeHandle; _activeHandle = null;
+        var marquee = _marquee; _dragStart = null; _dragCurrent = null;
+        _completingGesture = true;
+        try { ReleaseMouseCapture(); } finally { _completingGesture = false; }
+        if (!marquee && vertex < 0 && GeometryEditCompleted is not null)
+        {
+            if (start.DistanceTo(end) * _zoom > 2) GeometryEditCompleted.Invoke(new(start, end, new HashSet<string>(Selection), handle));
+            else GeometryEditCancelled?.Invoke();
+            InvalidateVisual(); return;
+        }
         if (vertex >= 0 && start.DistanceTo(end) * _zoom > 2)
             VertexDragCompleted?.Invoke(vertex, Snap(end));
         else if (marquee && start.DistanceTo(end) * _zoom > 4)
@@ -213,8 +275,26 @@ public sealed class HarnessCanvas : SKElement
                 for (var y = t; y < Math.Min(_scene.HeightMm, viewport.Bottom); y += GridSize)
                     c.DrawPoint((float)x, (float)y, grid);
         }
-        SkiaSceneRenderer.RenderScreen(c, _scene, viewport, _screenCache, Selection);
+        SkiaSceneRenderer.RenderScreen(c, _previewBackground ?? _scene, viewport, _previewBackground is null ? _screenCache : _previewCache, Selection);
+        if (_previewBackground is not null) SkiaSceneRenderer.RenderPrimitives(c, _previewPrimitives, viewport);
         using var accent = new SKPaint { Color = SKColor.Parse("#087F8C"), StrokeWidth = (float)(1.5 / _zoom), IsAntialias = true, Style = SKPaintStyle.Stroke };
+        using var tangent = new SKPaint { Color = PreviewRejected ? SKColors.Red : SKColor.Parse("#D99B00"), StrokeWidth = (float)(1 / _zoom), IsAntialias = true, Style = SKPaintStyle.Stroke };
+        using var handleFill = new SKPaint { Color = PreviewRejected ? SKColors.OrangeRed : SKColor.Parse("#FFD12F"), IsAntialias = true, Style = SKPaintStyle.Fill };
+        foreach (var handle in PreviewHandles ?? GeometryHandles)
+        {
+            if (handle.Kind != GeometryHandleKind.Knot)
+            {
+                c.DrawLine((float)handle.Origin.X, (float)handle.Origin.Y, (float)handle.Position.X, (float)handle.Position.Y, tangent);
+                c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(4 / _zoom), handleFill);
+                c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(4 / _zoom), tangent);
+            }
+            else c.DrawCircle((float)handle.Position.X, (float)handle.Position.Y, (float)(3 / _zoom), accent);
+        }
+        if (PreviewRejected && _previewPrimitives.Count > 0)
+        {
+            var b = SceneBounds.Around(_previewPrimitives.SelectMany(p => new[] { new Point2(p.Bounds.Left, p.Bounds.Top), new Point2(p.Bounds.Right, p.Bounds.Bottom) }), 1);
+            c.DrawRect((float)b.X, (float)b.Y, (float)b.Width, (float)b.Height, tangent);
+        }
         foreach (var vertex in EditableVertices)
             c.DrawRect((float)(vertex.X - 3 / _zoom), (float)(vertex.Y - 3 / _zoom), (float)(6 / _zoom), (float)(6 / _zoom), accent);
         if (_dragStart.HasValue && _dragCurrent.HasValue)
@@ -224,7 +304,7 @@ public sealed class HarnessCanvas : SKElement
                 var b = SceneBounds.Around([_dragStart.Value, _dragCurrent.Value]);
                 c.DrawRect((float)b.X, (float)b.Y, (float)b.Width, (float)b.Height, accent);
             }
-            else
+            else if (_previewBackground is null)
             {
                 var delta = _dragCurrent.Value - _dragStart.Value;
                 foreach (var id in Selection)

@@ -24,6 +24,7 @@ public partial class MainWindow
         Canvas.Tool = tool;
         Canvas.SnapEnabled = SnapCheck.IsChecked == true;
         Canvas.EditableVertices.Clear();
+        Canvas.GeometryHandles.Clear();
         ToolHint.Text = tool switch
         {
             EditorTool.Select => "Slepen = verplaatsen · Ctrl+klik = meervoudige selectie",
@@ -106,9 +107,16 @@ public partial class MainWindow
                 if (e.Clicks == 2 && SelectedRoute() is { } selected)
                 {
                     if (!CanEditLayer(selected.LayerId)) return;
-                    var closest = Enumerable.Range(0, selected.Points.Count - 1)
-                        .MinBy(i => SceneSpatialIndex.DistanceToSegment(model, selected.Points[i], selected.Points[i + 1]));
-                    try { Execute(HarnessOperations.InsertRoutePoint(_project, _view, selected, closest, model)); }
+                    var wire = _project.Assembly.Conductors.Find(w => w.Id == SelectedId);
+                    var geometry = Geometry.EditableRouteGeometry(_view, selected, wire?.Id);
+                    var closest = NearestSegment(geometry, model);
+                    var parameter = Enumerable.Range(1, 99).MinBy(i => Geometry.Evaluate(geometry, closest, i / 100d).DistanceTo(model)) / 100d;
+                    try
+                    {
+                        var split = Geometry.Split(geometry, closest, parameter);
+                        Execute(wire is null ? HarnessOperations.SetRouteGeometry(_project, _view, selected, split)
+                            : HarnessOperations.SetWireRouteGeometry(_project, _view, wire, selected, split, _editWholeBundle));
+                    }
                     catch (Exception ex) { MessageBox.Show(this, ex.Message, "Route niet gewijzigd"); }
                 }
                 break;
@@ -216,7 +224,9 @@ public partial class MainWindow
     {
         var id = SelectedId;
         var wire = _project.Assembly.Conductors.Find(w => w.Id == id);
-        return _view.Routes.Find(r => r.BranchId == id || r.Id == id || wire?.BranchIds.Contains(r.BranchId) == true);
+        return _view.Routes.Find(r => r.BranchId == id || r.Id == id) ??
+            _view.Routes.Find(r => r.Id == _editingRouteId && wire?.BranchIds.Contains(r.BranchId) == true) ??
+            _view.Routes.Find(r => wire?.BranchIds.Contains(r.BranchId) == true);
     }
     private void CanvasDrag(CanvasDrag drag)
     {

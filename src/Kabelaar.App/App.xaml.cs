@@ -7,11 +7,16 @@ namespace Kabelaar.App;
 public partial class App : Application
 {
     private bool _backgroundAcceptance;
+    internal static bool IsBackgroundAcceptance { get; private set; }
     public static string DataDirectory { get; } = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kabelaar.UserData", "Data");
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        IsBackgroundAcceptance = e.Args.Contains("--smoke-test") || e.Args.Contains("--installed-acceptance") ||
+            e.Args.Contains("--acceptance-hold") ||
+            (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("KABELAAR_ACCEPTANCE_LAUNCH_OUTPUT")) &&
+             !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("KABELAAR_ACCEPTANCE_NONCE")));
         Directory.CreateDirectory(DataDirectory);
         DispatcherUnhandledException += OnUnexpectedException;
         TaskScheduler.UnobservedTaskException += (_, args) => { Log(args.Exception); args.SetObserved(); };

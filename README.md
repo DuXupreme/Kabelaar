@@ -3,7 +3,7 @@
 Windows-desktopapp voor productietekeningen van kabelbomen. C# / .NET 10, WPF,
 SkiaSharp en een apart C++/Open CASCADE-proces voor STEP.
 
-De huidige versie is **0.9.2, lokale acceptatieversie**. De aanduiding 1.0 is
+De huidige bronversie is **0.9.3, lokale acceptatieversie**. De aanduiding 1.0 is
 gereserveerd voor de volledige praktijktest, inclusief installatie op een tweede
 pc en beoordeling van een echte productietekening. Er is geen publieke updatefeed.
 
@@ -56,6 +56,25 @@ snapping. In een aanzicht **op schaal** blijft de connectorvergroting 1.
 
 ## Geometrie en productiegegevens
 
+Selecteer een ader en gebruik **Draad tekenen** bovenaan de eigenschappen.
+Kies recht of gebogen, een hele routetak of één segment, bochtuitwijking en een
+eigen lijndikte. Ook een draad met slechts twee eindpunten kan een bocht krijgen.
+De gele bolletjes sturen de richting en kromming; de blauwe punten verplaatsen
+knopen. Handvatten kunnen onafhankelijk, uitgelijnd of gespiegeld werken.
+**Bocht omkeren** en **Handvatten herstellen** zijn expliciete acties.
+
+In vrije opmaak geldt de vorm standaard alleen voor de geselecteerde ader.
+**Bewerk hele bundel** vervangt de afzonderlijke vormen door een gedeelde route.
+Bij slepen kies je een segment, tak of hele ader en of aangesloten uiteinden
+blijven zitten, het aangesloten knooppunt meenemen of expliciet loskomen.
+De werkelijke geometrie wordt tijdelijk getoond. Escape annuleert; bevestigen
+vormt één undo-stap. Een afgewezen lengtewijziging verandert het project niet.
+
+Bij meervoudige selectie worden uitsluitend gewijzigde gemeenschappelijke
+eigenschappen toegepast; verschillende waarden worden als zodanig getoond.
+De kleurkiezer en het palet wijzigen de tekenkleur. Fysieke kleurcode en
+aderdoorsnede blijven afzonderlijke productiegegevens.
+
 - **Op schaal:** routegeometrie in millimeters bepaalt de fysieke routelengte.
 - **Vrije opmaak:** de vormgeving wijzigt geen fysieke maten.
 - **Lengte vast:** een wijziging die de fysieke lengte verandert wordt afgewezen.
@@ -96,11 +115,12 @@ automatisch passend maken en controleer de maatlijn vóór gebruik op ware groot
 Bronbestanden of de lokale bibliotheek zijn op de ontvangende pc niet nodig.
 Onderdeelbibliotheken gebruiken `.kabelaarlib`, sjablonen `.kabelaartemplate`.
 
-Vanaf 0.9.2 gebruiken opgeslagen projecten **schema 2** voor de nieuwe
-aanzichtinstellingen. De app opent ook schema-1-projecten, behoudt de fysieke
+Vanaf 0.9.3 gebruiken opgeslagen projecten **schema 3** voor individuele
+aderopmaak en expliciete bochthandvatten. De app opent ook schema-1- en
+schema-2-projecten, behoudt de bestaande curveweergave en de fysieke
 gegevens en tekenobjecten en vult de nieuwe stijlvelden met standaardwaarden.
 Openen wijzigt het bronbestand niet; na opslaan
-gebruikt het pakket schema 2. Kabelaar 0.9.1 en ouder weigeren dit nieuwere schema,
+gebruikt het pakket schema 3. Kabelaar 0.9.2 en ouder weigeren dit nieuwere schema,
 zodat zij de nieuwe opmaak niet stilzwijgend verliezen.
 
 Opslaan gebruikt een tijdelijk bestand en een atomische vervanging met herstelbare

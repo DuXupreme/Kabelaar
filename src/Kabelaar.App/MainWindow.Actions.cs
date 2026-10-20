@@ -108,7 +108,13 @@ public partial class MainWindow
             }
             foreach (var group in _project.Assembly.TwistGroups.Where(g => g.ConductorIds.Any(id => selectedWires.Any(w => w.Id == id))).ToArray())
                 commands.Add(RemoveItem("Twistgroep verwijderen", _project.Assembly.TwistGroups, group));
-            foreach (var wire in selectedWires) commands.Add(RemoveItem("Ader verwijderen", _project.Assembly.Conductors, wire));
+            foreach (var wire in selectedWires)
+            {
+                foreach (var view in _project.Sheets.SelectMany(s => s.Views))
+                    foreach (var presentation in view.WirePresentations.Where(p => p.ConductorId == wire.Id).ToArray())
+                        commands.Add(RemoveItem("Aderweergave verwijderen", view.WirePresentations, presentation));
+                commands.Add(RemoveItem("Ader verwijderen", _project.Assembly.Conductors, wire));
+            }
             var orphanBranches = _project.Assembly.Branches.Where(b => selectedBranches.Contains(b.Id) &&
                 !_project.Assembly.Conductors.Except(selectedWires).Any(w => w.BranchIds.Contains(b.Id))).ToArray();
             foreach (var branch in orphanBranches)
@@ -122,7 +128,13 @@ public partial class MainWindow
             foreach (var view in _project.Sheets.SelectMany(s => s.Views))
             {
                 foreach (var p in view.Components.Where(p => entityIds.Contains(p.EntityId)).ToArray()) commands.Add(RemoveItem("Weergave verwijderen", view.Components, p));
-                foreach (var r in view.Routes.Where(r => orphanBranches.Any(b => b.Id == r.BranchId)).ToArray()) commands.Add(RemoveItem("Routeweergave verwijderen", view.Routes, r));
+                foreach (var r in view.Routes.Where(r => orphanBranches.Any(b => b.Id == r.BranchId)).ToArray())
+                {
+                    foreach (var presentation in view.WirePresentations)
+                        foreach (var geometry in presentation.Routes.Where(g => g.BranchId == r.BranchId).ToArray())
+                            commands.Add(RemoveItem("Afzonderlijke routeweergave verwijderen", presentation.Routes, geometry));
+                    commands.Add(RemoveItem("Routeweergave verwijderen", view.Routes, r));
+                }
                 foreach (var a in view.Annotations.Where(a => !(view == _view && ids.Contains(a.Id)) && a.EntityId is not null && (entityIds.Contains(a.EntityId) || orphanBranches.Any(b => b.Id == a.EntityId))).ToArray())
                     commands.Add(RemoveItem("Gekoppelde annotatie verwijderen", view.Annotations, a));
             }
@@ -140,7 +152,12 @@ public partial class MainWindow
             foreach (var p in _view.Components.Where(p => ids.Contains(p.EntityId) || ids.Contains(p.Id)).ToArray())
                 commands.Add(RemoveItem("Weergave verwijderen", _view.Components, p));
             foreach (var r in _view.Routes.Where(r => selectedBranches.Contains(r.BranchId) || ids.Contains(r.Id)).ToArray())
+            {
+                foreach (var presentation in _view.WirePresentations)
+                    foreach (var geometry in presentation.Routes.Where(g => g.BranchId == r.BranchId).ToArray())
+                        commands.Add(RemoveItem("Afzonderlijke routeweergave verwijderen", presentation.Routes, geometry));
                 commands.Add(RemoveItem("Routeweergave verwijderen", _view.Routes, r));
+            }
         }
         foreach (var a in _view.Annotations.Where(a => ids.Contains(a.Id)).ToArray())
             commands.Add(RemoveItem("Annotatie verwijderen", _view.Annotations, a));

@@ -185,6 +185,8 @@ public sealed class ProjectStore
         // fields, retaining its original appearance. Every pre-existing field remains
         // mandatory, and explicit null or malformed values are never repaired.
         var upgraded = JsonNode.Parse(root.GetRawText())!.AsObject();
+        if (version == 1)
+        {
         var spliceIds = new HashSet<string>(StringComparer.Ordinal);
         if (upgraded["assembly"] is JsonObject assembly && assembly["splices"] is JsonArray splices)
             foreach (var splice in splices.OfType<JsonObject>())
@@ -214,6 +216,25 @@ public sealed class ProjectStore
                             }
                         }
                     }
+        }
+        // Schema 3 adds optional explicit curves and per-view wire presentation.
+        // Null geometry deliberately keeps every legacy Catmull sample unchanged.
+        if (version <= 2)
+        {
+            if (upgraded["assembly"] is JsonObject curveAssembly && curveAssembly["branches"] is JsonArray branches)
+                foreach (var branch in branches.OfType<JsonObject>())
+                    if (!branch.ContainsKey("geometry")) branch["geometry"] = null;
+            if (upgraded["sheets"] is JsonArray curveSheets)
+                foreach (var sheet in curveSheets.OfType<JsonObject>())
+                    if (sheet["views"] is JsonArray views)
+                        foreach (var view in views.OfType<JsonObject>())
+                        {
+                            if (!view.ContainsKey("wirePresentations")) view["wirePresentations"] = new JsonArray();
+                            if (view["routes"] is JsonArray routes)
+                                foreach (var route in routes.OfType<JsonObject>())
+                                    if (!route.ContainsKey("geometry")) route["geometry"] = null;
+                        }
+        }
         upgraded["schemaVersion"] = HarnessProject.CurrentSchemaVersion;
         return upgraded.Deserialize<HarnessProject>(LoadOptions) ?? throw new ProjectFormatException("Het projectbestand is leeg.");
     }

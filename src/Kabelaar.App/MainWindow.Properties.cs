@@ -17,6 +17,7 @@ public partial class MainWindow
     private void ShowProperties()
     {
         Canvas.EditableVertices.Clear();
+        Canvas.GeometryHandles.Clear();
         if (Canvas.Selection.Count == 0)
         {
             var state = ProjectPropertiesState();
@@ -51,7 +52,13 @@ public partial class MainWindow
         var annotation = _view.Annotations.Find(a => a.Id == id);
         var route = SelectedRoute();
 
-        if (Canvas.Selection.Count > 1) form.Note($"{Canvas.Selection.Count} objecten geselecteerd. Hieronder bewerk je uitsluitend het eerst geselecteerde object.");
+        if (Canvas.Selection.Count > 1)
+        {
+            PropertiesHeading.Text = $"SELECTIE · {Canvas.Selection.Count} objecten";
+            BuildMultipleProperties(form);
+            Canvas.InvalidateVisual();
+            return;
+        }
         if (connector is not null)
         {
             PropertiesHeading.Text = $"CONNECTOR · {connector.Name}";
@@ -84,7 +91,7 @@ public partial class MainWindow
         }
         if (route is not null && Canvas.Tool == EditorTool.Select && Canvas.Selection.Count == 1 &&
             _sheet.Layers.Find(l => l.Id == route.LayerId)?.Locked != true)
-            Canvas.EditableVertices.AddRange(route.Points.Select(ToSheet));
+            RefreshGeometryHandles(wire, route);
         Canvas.InvalidateVisual();
     }
 
@@ -277,6 +284,8 @@ public partial class MainWindow
 
     private void BuildWireProperties(PropertyForm form, Conductor wire)
     {
+        BuildWireDrawingProperties(form, wire);
+        form.Heading("Productiegegevens");
         var name = form.Text("Draadnummer", wire.Name);
         var fromOptions = EndpointChoices();
         var from = form.Choice("Van aansluiting", fromOptions, CurrentEndpointOption(fromOptions, wire.From), o => o.Label);
@@ -292,7 +301,7 @@ public partial class MainWindow
         from.SelectionChanged += (_, _) => UpdateEnds(); to.SelectionChanged += (_, _) => UpdateEnds(); UpdateEnds();
         var part = PartChoice(form, "Draadartikel", wire.WirePartId, PartKind.Wire);
         var colorCode = form.Text("Fysieke kleurcode", wire.ColorCode);
-        var color = form.Text("Tekenkleur (#RRGGBB)", wire.Color);
+        var color = form.Color("Tekenkleur (#RRGGBB)", wire.Color);
         var section = form.Number("Doorsnede (mm²)", wire.CrossSectionMm2);
         var signal = form.Text("Signaal / functie", wire.Signal);
         var cableOptions = new[] { new PropertyOption(null, "Losse draad") }.Concat(_project.Assembly.Cables.Select(c => new PropertyOption(c.Id, c.Name))).ToArray();
@@ -420,7 +429,14 @@ public partial class MainWindow
         {
             var nextPoints = ParsePropertyPoints(points.Text, 2);
             VerifyAttachedRoutePoints(route, nextPoints);
-            var command = HarnessOperations.SetRoutePoints(_project, _view, route, nextPoints, smooth.IsChecked == true);
+            var geometry = Geometry.EditableRouteGeometry(_view, route);
+            if (nextPoints.Count == geometry.Knots.Count) geometry = Geometry.WithPoints(geometry, nextPoints);
+            else geometry = Geometry.FromLegacy(nextPoints, smooth.IsChecked == true);
+            if (smooth.IsChecked != route.Smooth)
+                geometry = Geometry.WithCurveKind(geometry, smooth.IsChecked == true ? RouteSegmentKind.Cubic : RouteSegmentKind.Line, _bendOffsetMm);
+            var representative = _project.Assembly.Conductors.FirstOrDefault(w => w.BranchIds.Contains(route.BranchId));
+            var command = representative is null ? HarnessOperations.SetRouteGeometry(_project, _view, route, geometry)
+                : HarnessOperations.SetWireRouteGeometry(_project, _view, representative, route, geometry, true);
             var beforeLayer = route.LayerId; var afterLayer = PropertyForm.Value<DrawingLayer>(layer).Id;
             Execute(new CompositeCommand("Routegeometrie wijzigen", command,
                 new DelegateCommand("Routelaag", () => route.LayerId = afterLayer, () => route.LayerId = beforeLayer)));
@@ -432,7 +448,7 @@ public partial class MainWindow
     {
         var points = form.Text("Posities: één X; Y per regel (mm)", FormatPropertyPoints(annotation.Points), annotation.Points.Count > 1);
         var text = form.Text(annotation.Kind == AnnotationKind.Dimension ? "Maattekst (leeg = automatisch)" : "Tekst", annotation.Text, true);
-        var color = form.Text("Kleur (#RRGGBB)", annotation.Color);
+        var color = form.Color("Kleur (#RRGGBB)", annotation.Color);
         var fontSize = form.Number("Teksthoogte (mm)", annotation.FontSizeMm);
         var lineWidth = form.Number("Lijndikte (mm)", annotation.LineWidthMm);
         var layer = LayerChoice(form, annotation.LayerId);

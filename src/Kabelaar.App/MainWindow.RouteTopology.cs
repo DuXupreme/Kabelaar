@@ -76,7 +76,7 @@ public partial class MainWindow
             if (_view.Mode == LayoutMode.Scaled)
             {
                 var selected = PropertyForm.Value<int>(point);
-                var flattened = Kabelaar.Core.Geometry.Flatten(route.Points, route.Smooth).ToList();
+                var flattened = Kabelaar.Core.Geometry.Flatten(route).ToList();
                 var end = 0;
                 for (var index = 1; index <= selected; index++)
                     end = flattened.FindIndex(end + 1, p => p.DistanceTo(route.Points[index]) < 1e-7);

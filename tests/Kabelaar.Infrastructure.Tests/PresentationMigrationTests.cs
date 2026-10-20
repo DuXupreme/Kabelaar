@@ -19,7 +19,7 @@ public sealed class PresentationMigrationTests : IDisposable
         await SaveLegacy();
         var original = await File.ReadAllBytesAsync(PathFor());
         var loaded = (await store.LoadAsync(PathFor())).Project;
-        Assert.Equal(2, loaded.SchemaVersion);
+        Assert.Equal(HarnessProject.CurrentSchemaVersion, loaded.SchemaVersion);
         var view = loaded.Sheets[0].Views[0];
         Assert.True(view.Style.ShowWireLabels);
         Assert.True(view.Style.ShowTwistLabels);
@@ -37,7 +37,7 @@ public sealed class PresentationMigrationTests : IDisposable
         });
         Assert.Equal(original, await File.ReadAllBytesAsync(PathFor()));
         await store.SaveAsync(loaded, PathFor("upgraded.kabelaar"));
-        Assert.Equal(2, (await store.LoadAsync(PathFor("upgraded.kabelaar"))).Project.SchemaVersion);
+        Assert.Equal(HarnessProject.CurrentSchemaVersion, (await store.LoadAsync(PathFor("upgraded.kabelaar"))).Project.SchemaVersion);
     }
 
     [Fact]
@@ -136,7 +136,7 @@ public sealed class PresentationMigrationTests : IDisposable
         var target = new HarnessProject();
         Assert.NotEmpty(await libraries.ImportAsync(PathFor(), target));
         var template = await libraries.CreateFromTemplateAsync(PathFor());
-        Assert.Equal(2, template.SchemaVersion);
+        Assert.Equal(HarnessProject.CurrentSchemaVersion, template.SchemaVersion);
         Assert.Equal(.45, template.Sheets[0].Views[0].Style.WireLineWidthMm);
 
         Rewrite(root => root["parts"]![0]!.AsObject().Remove("pins"));

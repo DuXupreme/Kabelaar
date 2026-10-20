@@ -44,6 +44,19 @@ en `scope: functional-only`; het is geen prestatietest. De runtimehashes moeten
 overeenkomen met de exacte release die de volledige benchmark al heeft doorstaan.
 De volledige build accepteert deze beperkte modus niet als prestatiebewijs.
 
+Vanaf 0.9.3 controleert de verborgen WPF-ketentest ook de directe
+draadeigenschappen, meervoudige wijzigingen, gele handvatten, annuleren,
+endpointgedrag, segment-/bundelbewerking en bijbehorende undo/redo.
+Een extra meetlus controleert daadwerkelijke bochtvoorvertoningen op het
+100/1000-blad met dezelfde 33/100-ms-grenzen. De test kan zijn eigen WPF-inhoud
+naar een afbeelding schrijven; de desktop van de gebruiker wordt niet vastgelegd.
+
+Een optionele lokale voorbeeldcontrole accepteert `--example-project <bestand>`
+en `--example-output <nieuwe-map>` naast de smoke-argumenten. Zij schrijft alleen
+controlekopieën en uitvoer naar die nieuwe map, vergelijkt fysieke gegevens en
+bestaande controlebevindingen en verifieert de hash van het oorspronkelijke
+bestand. Bedrijfspaden en -gegevens staan niet in de broncode of testfixtures.
+
 ## Geautomatiseerde installatieproef
 
 `scripts/Test-KabelaarInstallation.ps1` gebruikt uitsluitend synthetische

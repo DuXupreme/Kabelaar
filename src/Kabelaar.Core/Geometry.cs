@@ -1,6 +1,6 @@
 namespace Kabelaar.Core;
 
-public static class Geometry
+public static partial class Geometry
 {
     public const double LengthToleranceMm = 0.01;
 

@@ -65,6 +65,10 @@ public partial class MainWindow : Window
         Canvas.CanvasClicked += CanvasClick;
         Canvas.DragCompleted += CanvasDrag;
         Canvas.VertexDragCompleted += VertexDrag;
+        Canvas.GeometryEditStarted += BeginGeometryEdit;
+        Canvas.GeometryEditUpdated += UpdateGeometryEdit;
+        Canvas.GeometryEditCompleted += CommitGeometryEdit;
+        Canvas.GeometryEditCancelled += CancelGeometryEdit;
         Canvas.FinishDrawing += FinishDrawing;
         Canvas.SnapProvider = SnapToEndpoint;
         Canvas.PointerMoved += p => PositionText.Text = $"X {p.X:0.0}   Y {p.Y:0.0} mm";
@@ -100,7 +104,7 @@ public partial class MainWindow : Window
     {
         if (_busy is not null || _saving) { Status("Wacht tot de actieve bewerking klaar is."); return; }
         try { _history.Execute(command); Status(command.Name); }
-        catch (Exception ex) { App.Log(ex); MessageBox.Show(this, ex.Message, "Bewerking niet toegepast", MessageBoxButton.OK, MessageBoxImage.Warning); }
+        catch (Exception ex) { App.Log(ex); if (App.IsBackgroundAcceptance) throw; MessageBox.Show(this, ex.Message, "Bewerking niet toegepast", MessageBoxButton.OK, MessageBoxImage.Warning); }
     }
     private void Change<T>(string name, List<T> list, T original, T replacement)
     {

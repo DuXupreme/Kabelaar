@@ -34,6 +34,21 @@ public static class SkiaSceneRenderer
         canvas.Restore();
     }
 
+    /// <summary>Small, transient overlays bypass the retained scene/raster caches.</summary>
+    public static void RenderPrimitives(SKCanvas canvas, IEnumerable<ScenePrimitive> primitives, SceneBounds? visibleBounds = null)
+    {
+        ArgumentNullException.ThrowIfNull(canvas);
+        canvas.Save();
+        try
+        {
+            if (visibleBounds is { } bounds) canvas.ClipRect(Rect(bounds));
+            foreach (var primitive in primitives)
+                if (visibleBounds is null || primitive.Bounds.Intersects(visibleBounds.Value))
+                    DrawPrimitive(canvas, primitive, false);
+        }
+        finally { canvas.Restore(); }
+    }
+
     /// <summary>Bounded, screen-only raster cache. Vector exports always use Render.</summary>
     public static void RenderScreen(SKCanvas canvas, DrawingScene scene, SceneBounds visibleBounds,
         ScreenSceneCache cache, ISet<string>? selectedIds = null)
