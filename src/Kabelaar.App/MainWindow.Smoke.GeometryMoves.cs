@@ -79,6 +79,32 @@ public partial class MainWindow
                 "Eén undo herstelt de losgemaakte aansluiting en pinbezetting");
 
             f = await Fixture();
+            Canvas.Select(f.Second.Id, true); await Idle();
+            _wireDragScope = WireDragScope.Segment;
+            _endpointMoveMode = EndpointMoveMode.DetachThisEndpoint;
+            before = JsonSerializer.Serialize(f.Project); token = _history.StateToken;
+            start = new(ToSheet(new(55, 80)), ToSheet(new(55, 80)), new HashSet<string> { f.First.Id, f.Second.Id });
+            moved = start with { Current = start.Current + new Point2(0, 17) };
+            BeginGeometryEdit(start); UpdateGeometryEdit(moved);
+            check(Canvas.HasGeometryPreview && !Canvas.PreviewRejected &&
+                before == JsonSerializer.Serialize(f.Project) && token == _history.StateToken,
+                "Twee geselecteerde aders losmaken toont beide vrije uiteinden zonder voortijdige wijziging van pinbezetting");
+            CommitGeometryEdit(moved); await Idle();
+            var afterMultiDetach = JsonSerializer.Serialize(f.Project);
+            check(f.First.From.Kind == EndpointKind.Free && f.Second.From.Kind == EndpointKind.Free &&
+                f.From.Cavities[0].State == CavityState.Unused && f.To.Cavities[0].State == CavityState.Occupied &&
+                f.First.To.CavityId == f.To.Cavities[0].Id && f.Second.To.CavityId == f.To.Cavities[0].Id &&
+                f.Project.Assembly.Conductors.Count == 2 && f.Branch.PhysicalLengthMm == 200,
+                "Gelijktijdig losmaken van alle aders maakt de gedeelde cavity ongebruikt en behoudt de andere aansluitingen");
+            _history.Undo(); await Idle();
+            check(before == JsonSerializer.Serialize(f.Project) && token == _history.StateToken &&
+                f.From.Cavities[0].State == CavityState.Occupied,
+                "Eén undo herstelt beide draadeinden, pinbezetting en geometrie na gezamenlijk losmaken");
+            _history.Redo(); await Idle();
+            check(afterMultiDetach == JsonSerializer.Serialize(f.Project) && f.From.Cavities[0].State == CavityState.Unused,
+                "Redo berekent de gedeelde pinbezetting opnieuw en herstelt exact dezelfde gezamenlijke losmaking");
+
+            f = await Fixture();
             _wireDragScope = WireDragScope.Segment;
             start = new(ToSheet(new(105, 80)), ToSheet(new(105, 80)), new HashSet<string> { f.First.Id });
             moved = start with { Current = start.Current + new Point2(0, 15) };

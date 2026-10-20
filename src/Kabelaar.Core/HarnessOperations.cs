@@ -326,7 +326,67 @@ public static partial class HarnessOperations
             () => { branch.PhysicalLengthMm = before; branch.LengthLocked = beforeLock; });
     }
 
-    public static IEditCommand SetConductorEndpoints(HarnessProject project, Conductor wire, Endpoint from, Endpoint to)
+    public static IEditCommand SetConductorEndpoints(HarnessProject project, Conductor wire, Endpoint from, Endpoint to) =>
+        SetConductorEndpointsBatch(project, new Dictionary<Conductor, (Endpoint From, Endpoint To)> { [wire] = (from, to) });
+
+    /// <summary>
+    /// Validates every replacement before applying any and derives cavity occupancy from
+    /// the complete proposed endpoint map. Capacity and missing production parts remain
+    /// production findings, just as with individual endpoint editing.
+    /// </summary>
+    public static IEditCommand SetConductorEndpointsBatch(HarnessProject project,
+        IReadOnlyDictionary<Conductor, (Endpoint From, Endpoint To)> changes)
+    {
+        ArgumentNullException.ThrowIfNull(changes);
+        var planned = new Dictionary<Conductor, (Endpoint From, Endpoint To)>();
+        var affected = new HashSet<(string EntityId, string CavityId)>();
+        void MarkCavity(Endpoint endpoint)
+        {
+            if (endpoint.Kind == EndpointKind.Cavity && endpoint.EntityId is { } entity && endpoint.CavityId is { } cavity)
+                affected.Add((entity, cavity));
+        }
+        foreach (var (wire, endpoints) in changes)
+        {
+            if (!project.Assembly.Conductors.Contains(wire))
+                throw new InvalidOperationException("Een gewijzigde ader hoort niet bij deze assemblage.");
+            ValidateEndpoint(project, endpoints.From); ValidateEndpoint(project, endpoints.To);
+            planned.Add(wire, (Clone(endpoints.From), Clone(endpoints.To)));
+            MarkCavity(wire.From); MarkCavity(wire.To);
+            MarkCavity(endpoints.From); MarkCavity(endpoints.To);
+        }
+
+        // Construction performs route/lock checks, so failure cannot leave another
+        // conductor or cavity partly changed.
+        var endpointCommands = planned.Select(change =>
+            SetConductorEndpointsCore(project, change.Key, change.Value.From, change.Value.To)).ToArray();
+        var occupied = new HashSet<(string EntityId, string CavityId)>();
+        foreach (var wire in project.Assembly.Conductors)
+        {
+            var ends = planned.TryGetValue(wire, out var replacement) ? replacement : (From: wire.From, To: wire.To);
+            MarkOccupied(ends.From); MarkOccupied(ends.To);
+        }
+        void MarkOccupied(Endpoint endpoint)
+        {
+            if (endpoint.Kind == EndpointKind.Cavity && endpoint.EntityId is { } entity && endpoint.CavityId is { } cavity)
+                occupied.Add((entity, cavity));
+        }
+        var cavityChanges = new List<(Cavity Cavity, CavityState Before, CavityState After)>();
+        foreach (var connector in project.Assembly.Connectors)
+            foreach (var cavity in connector.Cavities)
+            {
+                var key = (connector.Id, cavity.Id);
+                if (!affected.Contains(key)) continue;
+                var after = occupied.Contains(key) ? CavityState.Occupied :
+                    cavity.State == CavityState.Occupied ? CavityState.Unused : cavity.State;
+                cavityChanges.Add((cavity, cavity.State, after));
+            }
+        return new CompositeCommand("Aansluitingen wijzigen", [.. endpointCommands,
+            new DelegateCommand("Pinbezetting bijwerken",
+                () => { foreach (var change in cavityChanges) change.Cavity.State = change.After; },
+                () => { foreach (var change in cavityChanges) change.Cavity.State = change.Before; })]);
+    }
+
+    private static IEditCommand SetConductorEndpointsCore(HarnessProject project, Conductor wire, Endpoint from, Endpoint to)
     {
         var beforeFrom = wire.From; var beforeTo = wire.To;
         ValidateEndpoint(project, from); ValidateEndpoint(project, to);
@@ -385,28 +445,10 @@ public static partial class HarnessOperations
         }
         var routeCommands = changes.Select(change => SetRoutePoints(project, change.View, change.Route, change.Points, checkOtherScaledViews: false)).ToArray();
         var wireCommands = wireChanges.Select(change => SetWireRouteGeometry(project, change.View, wire, change.Route, change.Geometry)).ToArray();
-        var cavityChanges = new List<(Cavity Cavity, CavityState Before, CavityState After)>();
-        foreach (var connector in project.Assembly.Connectors)
-            foreach (var cavity in connector.Cavities)
-            {
-                bool Matches(Endpoint end) => end.Kind == EndpointKind.Cavity && end.EntityId == connector.Id && end.CavityId == cavity.Id;
-                if (!new[] { beforeFrom, beforeTo, from, to }.Any(Matches)) continue;
-                var occupied = project.Assembly.Conductors.Any(w => w != wire && (Matches(w.From) || Matches(w.To))) || Matches(from) || Matches(to);
-                var state = occupied ? CavityState.Occupied : cavity.State == CavityState.Occupied ? CavityState.Unused : cavity.State;
-                cavityChanges.Add((cavity, cavity.State, state));
-            }
         return new CompositeCommand("Aansluitingen wijzigen",
             [new DelegateCommand("Aansluitgegevens",
-                () =>
-                {
-                    wire.From = Clone(afterFrom); wire.To = Clone(afterTo);
-                    foreach (var change in cavityChanges) change.Cavity.State = change.After;
-                },
-                () =>
-                {
-                    wire.From = beforeFrom; wire.To = beforeTo;
-                    foreach (var change in cavityChanges) change.Cavity.State = change.Before;
-                }), .. routeCommands, .. wireCommands]);
+                () => { wire.From = Clone(afterFrom); wire.To = Clone(afterTo); },
+                () => { wire.From = beforeFrom; wire.To = beforeTo; }), .. routeCommands, .. wireCommands]);
     }
 
     private static Endpoint Clone(Endpoint endpoint) => new() { Kind = endpoint.Kind, EntityId = endpoint.EntityId, CavityId = endpoint.CavityId, Description = endpoint.Description };

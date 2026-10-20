@@ -204,7 +204,8 @@ public partial class MainWindow
                 if (UnchangedGeometry(entry.Original, edited[entry])) edited.Remove(entry);
             if (componentPositions.Count > 0)
                 commands.Add(HarnessOperations.MoveSelection(_project, _view, componentPositions));
-            foreach (var (wire, ends) in detached) commands.Add(HarnessOperations.SetConductorEndpoints(_project, wire, ends.From, ends.To));
+            if (detached.Count > 0)
+                commands.Add(HarnessOperations.SetConductorEndpointsBatch(_project, detached));
             foreach (var (entry, g) in edited)
             {
                 var representative = entry.Wire ?? _project.Assembly.Conductors.FirstOrDefault(w => w.BranchIds.Contains(entry.Route.BranchId));
