@@ -1,39 +1,12 @@
-# Python bytecode / caches
-__pycache__/
-*.py[cod]
-
-# Automatische / handmatige backups
+# Lokale herstelkopieën en logs
 *.bak
 *.bak_*
-
-# PyInstaller bouw-output (opnieuw te genereren uit de bron)
-/build/
-/build_exe/
-/dist/
-/release/
-
-# Velopack release-output
-/Releases/
-
-# Bij de build gegenereerde versie (zie tools/build_release.ps1)
-/_version.py
-
-# Persoonlijke gebruikersinstellingen (wordt op runtime aangemaakt)
-settings.json
-
-# Autosave-/crash-recovery-bestand (op runtime aangemaakt)
-autosave_recovery.json
-
-# Op runtime aangemaakte bibliotheken (lokaal, niet versiebeheerd)
-blocks_library.json
-symbols_library.json
-
-# Logbestanden (op runtime aangemaakt)
-/logs/
 *.log
-
-# POC-/benchmark-output (opnieuw te genereren via tools/)
-/aa_compare.png
-
-# Claude Code tooling
 .claude/
+
+# Desktop build output, native SDK downloads and local acceptance evidence
+**/bin/
+**/obj/
+/artifacts/
+/.vs/
+*.user

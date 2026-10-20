@@ -1,0 +1,51 @@
+Kabelaar native STEP worker 0.9.0
+
+Open CASCADE Technology 8.0.1
+Copyright Open Cascade SAS and contributors.
+LGPL 2.1 with the Open CASCADE additional exception.
+License text and exception are included in licenses/.
+Unmodified official release binaries and corresponding source:
+https://github.com/Open-Cascade-SAS/OCCT/releases/tag/V8.0.1
+https://github.com/Open-Cascade-SAS/OCCT/tree/V8_0_1
+
+The official OCCT STEP DLLs transitively load additional libraries even though this
+worker only uses geometry, tessellation and hidden-line projection. Their DLLs
+remain replaceable, separate files; this application does not restrict debugging
+modifications to these libraries.
+
+oneTBB 2021.13.0, Intel Corporation and contributors, Apache 2.0.
+https://github.com/oneapi-src/oneTBB/tree/v2021.13.0
+
+FreeType 2.13.3, The FreeType Project (www.freetype.org).
+Portions of this software are copyright The FreeType Project.
+Used under the FreeType License. See licenses/FTL.TXT.
+https://gitlab.freedesktop.org/freetype/freetype/-/tree/VER-2-13-3
+
+FreeImage 3.18.0, FreeImage contributors, FreeImage Public License.
+See licenses/freeimage-3.18.0-x64/license-fi.txt.
+https://freeimage.sourceforge.io/download.html
+
+jemalloc, Jason Evans and contributors, BSD license.
+See licenses/jemalloc-vc14-64/copyright.
+https://github.com/jemalloc/jemalloc
+
+OpenVR 1.14.15, Valve Corporation, BSD 3-Clause license.
+See licenses/OpenVR-LICENSE.
+https://github.com/ValveSoftware/openvr/tree/v1.14.15
+
+FFmpeg 3.3.4, FFmpeg contributors, LGPL 2.1 or later.
+The OCCT-provided build reports:
+--enable-shared --disable-static --toolchain=msvc --arch=amd64
+--disable-asm --disable-yasm --disable-swresample
+No GPL or nonfree configure options are enabled. These are transitive OCCT runtime
+dependencies; Kabelaar does not open or process media with FFmpeg.
+See licenses/LICENSE_LGPL_21.txt.
+Corresponding source: https://ffmpeg.org/releases/ffmpeg-3.3.4.tar.xz
+
+Microsoft Visual C++ runtime libraries are redistributed under their accompanying
+Microsoft Visual Studio redistribution terms. Windows system DLLs are not bundled.
+
+OCCT release archive SHA-256:
+307f694f1d4a280c7f58ee2ddb69a7f7e2b78d82749339efd40ce8b8b116d76c
+OCCT third-party archive SHA-256:
+12d04f688c583b8e896758f65cd7012458fee921cedb792ec6caaf469b372598

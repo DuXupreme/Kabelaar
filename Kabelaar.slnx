@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kabelaar.App/Kabelaar.App.csproj" />
+    <Project Path="src/Kabelaar.Core/Kabelaar.Core.csproj" />
+    <Project Path="src/Kabelaar.Infrastructure/Kabelaar.Infrastructure.csproj" />
+    <Project Path="src/Kabelaar.Rendering/Kabelaar.Rendering.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Kabelaar.Core.Tests/Kabelaar.Core.Tests.csproj" />
+    <Project Path="tests/Kabelaar.Infrastructure.Tests/Kabelaar.Infrastructure.Tests.csproj" />
+    <Project Path="tests/Kabelaar.Rendering.Tests/Kabelaar.Rendering.Tests.csproj" />
+  </Folder>
+</Solution>

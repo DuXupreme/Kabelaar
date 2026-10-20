@@ -1,3 +1,0 @@
-Pillow>=10.0,<13.0
-sv-ttk>=2.6
-cascadio==0.0.17

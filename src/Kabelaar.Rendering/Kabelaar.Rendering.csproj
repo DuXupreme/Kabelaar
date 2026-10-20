@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="..\Kabelaar.Core\Kabelaar.Core.csproj" />
+    <PackageReference Include="SkiaSharp" Version="4.153.1" />
+  </ItemGroup>
+</Project>

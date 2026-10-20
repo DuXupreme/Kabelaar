@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>Kabelaar</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>..\..\assets\icon.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Kabelaar.Core\Kabelaar.Core.csproj" />
+    <ProjectReference Include="..\Kabelaar.Infrastructure\Kabelaar.Infrastructure.csproj" />
+    <ProjectReference Include="..\Kabelaar.Rendering\Kabelaar.Rendering.csproj" />
+    <PackageReference Include="SkiaSharp.Views.WPF" Version="4.153.1" />
+    <PackageReference Include="Velopack" Version="1.2.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="..\..\artifacts\native-worker\Kabelaar.CadWorker.exe;..\..\artifacts\native-worker\*.dll;..\..\artifacts\native-worker\native-build-info.json;..\..\artifacts\native-worker\THIRD-PARTY-NOTICES.txt">
+      <Link>CadWorker\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+    <Content Include="..\..\artifacts\native-worker\licenses\**\*">
+      <Link>CadWorker\licenses\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+</Project>

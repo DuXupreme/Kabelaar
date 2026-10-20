@@ -1,0 +1,231 @@
+<Window x:Class="Kabelaar.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:Kabelaar.App"
+        Title="Kabelaar" Width="1380" Height="860" MinWidth="800" MinHeight="550"
+        WindowStartupLocation="CenterScreen" PreviewKeyDown="Window_KeyDown" Closing="Window_Closing">
+  <DockPanel>
+    <StatusBar DockPanel.Dock="Bottom" Background="#EAF0F4" Padding="6,2">
+      <StatusBarItem><TextBlock x:Name="StatusText" Text="Gereed"/></StatusBarItem>
+      <Separator/>
+      <StatusBarItem><TextBlock x:Name="PositionText" Text="mm"/></StatusBarItem>
+      <Separator/>
+      <StatusBarItem><TextBlock x:Name="ModeText" Text="Op schaal"/></StatusBarItem>
+      <StatusBarItem HorizontalAlignment="Right"><TextBlock x:Name="SaveStateText" Text="Nieuw project"/></StatusBarItem>
+    </StatusBar>
+    <Border DockPanel.Dock="Top" Background="#182C3C" Padding="16,9">
+      <DockPanel>
+        <TextBlock Text="KABELAAR" Foreground="White" FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
+        <TextBlock Text="PRODUCTIETEKENINGEN" Foreground="#89B8C4" FontSize="10" Margin="18,3,0,0" VerticalAlignment="Center"/>
+        <TextBlock x:Name="ProjectHeading" Text="Nieuwe kabelboom" Foreground="#D6E5EC" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+      </DockPanel>
+    </Border>
+    <Menu DockPanel.Dock="Top" Background="White" Padding="6,3">
+      <MenuItem Header="_Bestand">
+        <MenuItem Header="_Nieuw" InputGestureText="Ctrl+N" Click="New_Click"/>
+        <MenuItem Header="_Openen…" InputGestureText="Ctrl+O" Click="Open_Click"/>
+        <MenuItem Header="_Opslaan" InputGestureText="Ctrl+S" Click="Save_Click"/>
+        <MenuItem Header="Opslaan _als…" InputGestureText="Ctrl+Shift+S" Click="SaveAs_Click"/>
+        <Separator/>
+        <MenuItem Header="Nieuw uit sjabloon…" Click="OpenTemplate_Click"/>
+        <MenuItem Header="Opslaan als sjabloon…" Click="SaveTemplate_Click"/>
+        <Separator/>
+        <MenuItem Header="Synthetisch voorbeeld openen" Click="Demo_Click"/>
+        <MenuItem Header="Herstelbestanden…" Click="Recovery_Click"/>
+        <Separator/>
+        <MenuItem Header="Afsluiten" Click="Close_Click"/>
+      </MenuItem>
+      <MenuItem Header="_Bewerken">
+        <MenuItem x:Name="UndoMenu" Header="_Ongedaan maken" InputGestureText="Ctrl+Z" Click="Undo_Click"/>
+        <MenuItem x:Name="RedoMenu" Header="_Opnieuw" InputGestureText="Ctrl+Y" Click="Redo_Click"/>
+        <Separator/>
+        <MenuItem Header="Onderdeel dupliceren" InputGestureText="Ctrl+D" Click="Duplicate_Click"/>
+        <MenuItem Header="Verwijderen" InputGestureText="Delete" Click="Delete_Click"/>
+        <MenuItem Header="90° roteren" InputGestureText="R" Click="Rotate_Click"/>
+        <MenuItem Header="Horizontaal uitlijnen" Click="AlignHorizontal_Click"/>
+        <MenuItem Header="Verticaal uitlijnen" Click="AlignVertical_Click"/>
+        <Separator/>
+        <MenuItem Header="Projectgegevens…" Click="ProjectSettings_Click"/>
+        <MenuItem Header="Revisie toevoegen…" Click="Revision_Click"/>
+      </MenuItem>
+      <MenuItem Header="_Tekenen">
+        <MenuItem Header="Selecteren / verplaatsen" InputGestureText="Esc" Click="Tool_Click" Tag="Select"/>
+        <MenuItem Header="Connector plaatsen" Click="Tool_Click" Tag="Connector"/>
+        <MenuItem Header="Ader / route tekenen" InputGestureText="W" Click="Tool_Click" Tag="Wire"/>
+        <MenuItem Header="Splice plaatsen" Click="Tool_Click" Tag="Splice"/>
+        <Separator/>
+        <MenuItem Header="Tekst" Click="Tool_Click" Tag="Text"/>
+        <MenuItem Header="Maatlijn" Click="Tool_Click" Tag="Dimension"/>
+        <MenuItem Header="Leader / aanwijzing" Click="Tool_Click" Tag="Leader"/>
+        <MenuItem Header="Illustratielijn" Click="Tool_Click" Tag="Line"/>
+        <MenuItem Header="Boog" Click="Tool_Click" Tag="Arc"/>
+        <Separator/>
+        <MenuItem Header="Aansluitlijst plaatsen" Click="Tool_Click" Tag="WireTable"/>
+        <MenuItem Header="Pinlijst plaatsen" Click="Tool_Click" Tag="PinTable"/>
+        <MenuItem Header="Stuklijst plaatsen" Click="Tool_Click" Tag="BomTable"/>
+        <MenuItem Header="Revisietabel plaatsen" Click="Tool_Click" Tag="RevisionTable"/>
+        <MenuItem Header="Afbeelding / PDF-onderlegger…" Click="Reference_Click"/>
+      </MenuItem>
+      <MenuItem Header="_Onderdelen">
+        <MenuItem Header="Onderdeel definiëren…" Click="AddPart_Click"/>
+        <MenuItem Header="Geselecteerd bibliotheekonderdeel bewerken…" Click="EditPart_Click"/>
+        <MenuItem Header="STEP-model importeren…" Click="ImportStep_Click"/>
+        <Separator/>
+        <MenuItem Header="Bibliotheek importeren…" Click="ImportLibrary_Click"/>
+        <MenuItem Header="Bibliotheek exporteren…" Click="ExportLibrary_Click"/>
+        <MenuItem Header="Twisted pair / triad maken…" Click="Twist_Click"/>
+        <MenuItem Header="Kabel definiëren…" Click="Cable_Click"/>
+        <MenuItem Header="Kous / materiaal toevoegen…" Click="Material_Click"/>
+      </MenuItem>
+      <MenuItem Header="_Beeld">
+        <MenuItem Header="Blad passend" InputGestureText="Home" Click="Fit_Click"/>
+        <MenuItem Header="Inzoomen" Click="ZoomIn_Click"/>
+        <MenuItem Header="Uitzoomen" Click="ZoomOut_Click"/>
+        <Separator/>
+        <MenuItem Header="Nieuw blad" Click="AddSheet_Click"/>
+        <MenuItem Header="Nieuw detailaanzicht" Click="AddView_Click"/>
+        <MenuItem Header="Bladinstellingen…" Click="SheetSettings_Click"/>
+        <MenuItem Header="Lagen…" Click="Layers_Click"/>
+      </MenuItem>
+      <MenuItem Header="_Productie">
+        <MenuItem Header="Project controleren" InputGestureText="F7" Click="Validate_Click"/>
+        <MenuItem Header="Concept exporteren…" Click="DraftExport_Click"/>
+        <MenuItem Header="Productiepakket exporteren…" Click="ProductionExport_Click"/>
+        <MenuItem Header="Afdrukken / afdrukvoorbeeld…" Click="Print_Click"/>
+      </MenuItem>
+      <MenuItem Header="_Help">
+        <MenuItem Header="Bediening en werkwijze" InputGestureText="F1" Click="Help_Click"/>
+        <MenuItem Header="Lokale update installeren…" Click="LocalUpdate_Click"/>
+        <MenuItem Header="Over Kabelaar" Click="About_Click"/>
+      </MenuItem>
+    </Menu>
+    <Border DockPanel.Dock="Top" Background="White" BorderBrush="{StaticResource Rule}" BorderThickness="0,0,0,1" Padding="5,4">
+      <WrapPanel>
+        <Button Content="Opslaan" ToolTip="Ctrl+S" Click="Save_Click"/>
+        <Separator Width="10"/>
+        <Button x:Name="SelectToolButton" Content="Selecteren" Tag="Select" Click="Tool_Click"/>
+        <Button Content="Connector" Tag="Connector" Click="Tool_Click"/>
+        <Button Content="Ader" Tag="Wire" Click="Tool_Click"/>
+        <Button Content="Splice" Tag="Splice" Click="Tool_Click"/>
+        <Button Content="Maatlijn" Tag="Dimension" Click="Tool_Click"/>
+        <Button Content="Tekst" Tag="Text" Click="Tool_Click"/>
+        <Button Content="Passend" Click="Fit_Click"/>
+        <Separator Width="10"/>
+        <CheckBox x:Name="SnapCheck" Content="Raster" IsChecked="True" VerticalAlignment="Center" Margin="8,0"/>
+        <TextBox x:Name="GridSizeBox" Text="5" Width="38" ToolTip="Rasterafstand in millimeters" LostFocus="GridChanged"/>
+        <TextBlock Text="mm" VerticalAlignment="Center" Margin="4,0,8,0"/>
+        <ComboBox x:Name="LayoutModeBox" Width="126" SelectionChanged="LayoutMode_Changed" ToolTip="Betekenis van geometrie en productiematen">
+          <ComboBoxItem Content="Op schaal"/>
+          <ComboBoxItem Content="Vrije opmaak"/>
+        </ComboBox>
+        <Button Content="Controleren" Click="Validate_Click"/>
+        <Button Content="Productie-export" Click="ProductionExport_Click" Style="{StaticResource PrimaryButton}"/>
+      </WrapPanel>
+    </Border>
+    <Grid>
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="220" MinWidth="165"/>
+        <ColumnDefinition Width="5"/>
+        <ColumnDefinition Width="*" MinWidth="340"/>
+        <ColumnDefinition Width="5"/>
+        <ColumnDefinition Width="290" MinWidth="225"/>
+      </Grid.ColumnDefinitions>
+      <Grid.RowDefinitions>
+        <RowDefinition Height="*" MinHeight="160"/>
+        <RowDefinition Height="5"/>
+        <RowDefinition Height="210" MinHeight="100"/>
+      </Grid.RowDefinitions>
+      <Grid Grid.Column="0" Grid.RowSpan="3" Background="White">
+        <Grid.RowDefinitions><RowDefinition Height="2*"/><RowDefinition Height="5"/><RowDefinition Height="3*"/></Grid.RowDefinitions>
+        <DockPanel>
+          <TextBlock DockPanel.Dock="Top" Text="PROJECT EN BLADEN" Style="{StaticResource PanelTitle}"/>
+          <WrapPanel DockPanel.Dock="Bottom" Margin="6">
+            <Button Content="+ Blad" Click="AddSheet_Click"/>
+            <Button Content="+ Detail" Click="AddView_Click"/>
+          </WrapPanel>
+          <TreeView x:Name="ProjectTree" BorderThickness="0" SelectedItemChanged="Tree_SelectionChanged" Padding="6"/>
+        </DockPanel>
+        <GridSplitter Grid.Row="1" HorizontalAlignment="Stretch" Background="#E7EDF2"/>
+        <DockPanel Grid.Row="2">
+          <TextBlock DockPanel.Dock="Top" Text="ONDERDELENBIBLIOTHEEK" Style="{StaticResource PanelTitle}"/>
+          <TextBox x:Name="LibraryFilter" DockPanel.Dock="Top" Margin="8,0,8,6" ToolTip="Zoek naam, artikelnummer of leverancier" TextChanged="LibraryFilter_Changed"/>
+          <WrapPanel DockPanel.Dock="Bottom" Margin="6">
+            <Button Content="+ Onderdeel" Click="AddPart_Click"/>
+            <Button Content="STEP…" Click="ImportStep_Click"/>
+          </WrapPanel>
+          <ListBox x:Name="LibraryList" BorderThickness="0" SelectionChanged="Library_SelectionChanged" MouseDoubleClick="Library_DoubleClick" Margin="4">
+            <ListBox.ItemTemplate><DataTemplate>
+              <StackPanel Margin="6,5">
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                <TextBlock Text="{Binding PartNumber}" Foreground="{StaticResource Muted}" FontSize="11"/>
+                <TextBlock Text="{Binding Kind}" Foreground="#80909D" FontSize="10"/>
+              </StackPanel>
+            </DataTemplate></ListBox.ItemTemplate>
+          </ListBox>
+        </DockPanel>
+      </Grid>
+      <GridSplitter Grid.Column="1" Grid.RowSpan="3" HorizontalAlignment="Stretch" Background="#DEE5EB"/>
+      <Grid Grid.Column="2">
+        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+        <Border Background="#F0F4F7" Padding="12,7" BorderBrush="#DFE5EA" BorderThickness="0,0,0,1">
+          <DockPanel>
+            <TextBlock x:Name="SheetHeading" FontWeight="SemiBold" Text="Blad 1 · A3"/>
+            <TextBlock x:Name="ToolHint" Text="Selecteer een onderdeel of plaats een connector uit de bibliotheek." Foreground="{StaticResource Muted}" HorizontalAlignment="Right" Margin="12,0,0,0"/>
+          </DockPanel>
+        </Border>
+        <local:HarnessCanvas x:Name="Canvas" Grid.Row="1" Focusable="True"/>
+        <Border x:Name="BusyOverlay" Grid.RowSpan="2" Background="#DBF5F7F9" Visibility="Collapsed">
+          <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Width="320">
+            <TextBlock x:Name="BusyText" Text="Bezig…" FontSize="17" FontWeight="SemiBold" TextAlignment="Center" Margin="0,0,0,14"/>
+            <ProgressBar IsIndeterminate="True" Height="5"/>
+            <Button Content="Annuleren" Click="CancelBusy_Click" HorizontalAlignment="Center" Margin="0,15,0,0"/>
+          </StackPanel>
+        </Border>
+      </Grid>
+      <GridSplitter Grid.Column="3" Grid.RowSpan="3" HorizontalAlignment="Stretch" Background="#DEE5EB"/>
+      <DockPanel Grid.Column="4" Grid.RowSpan="3" Background="White">
+        <TextBlock x:Name="PropertiesHeading" DockPanel.Dock="Top" Text="EIGENSCHAPPEN" Style="{StaticResource PanelTitle}"/>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel x:Name="PropertiesPanel" Margin="12,0,12,16"/>
+        </ScrollViewer>
+      </DockPanel>
+      <GridSplitter Grid.Column="2" Grid.Row="1" HorizontalAlignment="Stretch" Background="#DEE5EB"/>
+      <TabControl x:Name="TablesTab" Grid.Column="2" Grid.Row="2" Background="White" BorderThickness="0">
+        <TabItem Header="Aansluitlijst">
+          <DataGrid x:Name="WireGrid" SelectionChanged="WireGrid_SelectionChanged" MouseDoubleClick="WireGrid_DoubleClick">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Ader" Binding="{Binding Name}" Width="65"/>
+              <DataGridTextColumn Header="Van" Binding="{Binding From}" Width="100"/>
+              <DataGridTextColumn Header="Naar" Binding="{Binding To}" Width="100"/>
+              <DataGridTextColumn Header="Kleur" Binding="{Binding Color}" Width="60"/>
+              <DataGridTextColumn Header="mm²" Binding="{Binding CrossSection}" Width="55"/>
+              <DataGridTextColumn Header="Route mm" Binding="{Binding RouteLength}" Width="80"/>
+              <DataGridTextColumn Header="Knip mm" Binding="{Binding CutLength}" Width="80"/>
+              <DataGridTextColumn Header="Signaal / functie" Binding="{Binding Signal}" Width="*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </TabItem>
+        <TabItem Header="Stuklijst">
+          <DataGrid x:Name="BomGrid">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Artikelnummer" Binding="{Binding PartNumber}" Width="160"/>
+              <DataGridTextColumn Header="Omschrijving" Binding="{Binding Description}" Width="*"/>
+              <DataGridTextColumn Header="Aantal" Binding="{Binding Quantity}" Width="80"/>
+              <DataGridTextColumn Header="Eenheid" Binding="{Binding Unit}" Width="70"/>
+              <DataGridTextColumn Header="Leverancier" Binding="{Binding Supplier}" Width="140"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </TabItem>
+        <TabItem x:Name="IssuesTab" Header="Controle">
+          <DataGrid x:Name="IssuesGrid" SelectionChanged="IssuesGrid_SelectionChanged">
+            <DataGrid.Columns>
+              <DataGridTextColumn Header="Niveau" Binding="{Binding Severity}" Width="85"/>
+              <DataGridTextColumn Header="Code" Binding="{Binding Code}" Width="120"/>
+              <DataGridTextColumn Header="Bevinding" Binding="{Binding Message}" Width="*"/>
+            </DataGrid.Columns>
+          </DataGrid>
+        </TabItem>
+      </TabControl>
+    </Grid>
+  </DockPanel>
+</Window>
