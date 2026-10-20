@@ -156,6 +156,9 @@ function Invoke-ShellProbe([string]$File, [string]$Name) {
         # identifies the actual owned application, which waits for this acknowledgement.
         if ($null -ne $process) { $process.Dispose() }
         $launched = [Diagnostics.Process]::GetProcessById([int]$report.identity.processId)
+        # Retain a native handle before allowing exit. A PID-only Process can lose
+        # its exit code after the process disappears (PowerShell then exposes null).
+        $null = $launched.Handle
         Set-Content -LiteralPath (Join-Path $directory 'launch.ack') -Value $nonce -Encoding utf8
         if ((Wait-OwnedExit $launched 15) -ne 0) { throw 'Shell-launched acceptance process failed.' }
         return $report
@@ -183,6 +186,7 @@ if ($Mode -eq 'Application') {
     if ((Wait-OwnedExit $process 120) -ne 0) { throw 'The application update stage failed before applying.' }
     $transitionReport = Wait-Report (Join-Path $transition 'verify-update-result.json')
     $restart = [Diagnostics.Process]::GetProcessById([int]$transitionReport.identity.processId)
+    $null = $restart.Handle
     Set-Content -LiteralPath (Join-Path $transition 'verify-update.ack') -Value 'result received' -Encoding utf8
     if ((Wait-OwnedExit $restart 15) -ne 0) { throw 'Restart verification did not exit successfully.' }
     Verify-UserData $acrossUpdate
