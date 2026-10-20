@@ -10,7 +10,6 @@ public partial class App : Application
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Kabelaar.UserData", "Data");
     protected override void OnStartup(StartupEventArgs e)
     {
-        WindowsIntegration.Configure(Velopack.VelopackApp.Build()).Run();
         base.OnStartup(e);
         Directory.CreateDirectory(DataDirectory);
         DispatcherUnhandledException += OnUnexpectedException;

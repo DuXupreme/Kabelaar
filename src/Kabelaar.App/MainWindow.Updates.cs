@@ -1,4 +1,6 @@
 using System.IO;
+using System.Diagnostics;
+using System.ComponentModel;
 using System.Windows;
 using Kabelaar.Core;
 using Kabelaar.Infrastructure;
@@ -30,6 +32,7 @@ public partial class MainWindow
                     "Lokale update", MessageBoxButton.OK, MessageBoxImage.Information);
                 return;
             }
+            if (!CanRestartForUpdate()) return;
             UpdateInfo? candidate = null;
             bool checkedFeed = false;
             await BusyAsync("Lokale releasemap lezen…", async token =>
@@ -69,11 +72,13 @@ public partial class MainWindow
                 Status("Update voorbereid. Herstart uitgesteld.");
                 return;
             }
+            if (!CanRestartForUpdate()) return;
             if (!await ConfirmLeaveAsync())
             {
                 Status("Update voorbereid. Je werk blijft open; er is geen herstart uitgevoerd.");
                 return;
             }
+            if (!CanRestartForUpdate()) return;
             _closing = true;
             _autosave.Stop();
             _lease?.Dispose();
@@ -106,5 +111,33 @@ public partial class MainWindow
             MessageBox.Show(this, error.Message + "\n\nDe update is niet gestart. Je document blijft beschikbaar.",
                 "Lokale update mislukt", MessageBoxButton.OK, MessageBoxImage.Error);
         }
+    }
+    private bool CanRestartForUpdate()
+    {
+        var root = Velopack.Locators.VelopackLocator.Current.RootAppDir;
+        if (string.IsNullOrWhiteSpace(root)) return false;
+        var prefix = Path.GetFullPath(root).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var otherWindow = false;
+        foreach (var candidate in Process.GetProcessesByName("Kabelaar"))
+        {
+            using (candidate)
+            {
+                if (candidate.Id == Environment.ProcessId) continue;
+                try
+                {
+                    if (candidate.HasExited) continue;
+                    var path = candidate.MainModule?.FileName;
+                    if (path is null || Path.GetFullPath(path).StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                        otherWindow = true;
+                }
+                catch (InvalidOperationException) { /* Process has already exited. */ }
+                catch (Win32Exception) { otherWindow = true; }
+            }
+        }
+        if (!otherWindow) return true;
+        MessageBox.Show(this,
+            "Bewaar je werk en sluit eerst de andere vensters van deze Kabelaar-installatie. Start de update daarna vanuit dit venster.",
+            "Andere documenten zijn geopend", MessageBoxButton.OK, MessageBoxImage.Information);
+        return false;
     }
 }
