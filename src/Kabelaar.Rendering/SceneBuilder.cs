@@ -59,26 +59,21 @@ public static partial class SceneBuilder
             throw new ArgumentException("Bladformaat en afdrukschaal moeten eindig en positief zijn.", nameof(sheet));
         var primitives = new List<ScenePrimitive>();
         var layers = FirstById(sheet.Layers, l => l.Id);
-        var parts = FirstById(project.Parts, p => p.Id);
-        var branches = FirstById(project.Assembly.Branches, b => b.Id);
-        var connectors = FirstById(project.Assembly.Connectors, c => c.Id);
+        var lookups = Lookups(project);
+        var parts = lookups.Parts.ById;
+        var branches = lookups.Branches.ById;
+        var connectors = lookups.Connectors.ById;
         var visualParts = new Dictionary<string, PartVisual>();
         foreach (var connector in connectors.Values)
             if (!visualParts.ContainsKey(connector.PartId) && parts.TryGetValue(connector.PartId, out var part))
                 visualParts.Add(connector.PartId, VisualPart(part));
-        var splices = FirstById(project.Assembly.Splices, s => s.Id);
-        var conductors = FirstById(project.Assembly.Conductors, w => w.Id);
-        var wiresByBranch = project.Assembly.Conductors.SelectMany(w => w.BranchIds.Select(id => (id, wire: w))).ToLookup(x => x.id, x => x.wire);
-        var wiresByRoute = project.Assembly.Conductors.Where(w => w.BranchIds.Count > 0)
-            .GroupBy(w => string.Join("|", w.BranchIds)).ToDictionary(g => g.Key, g => g.OrderBy(w => w.Id).ToArray());
-        var wireOffsets = new Dictionary<string, double>();
-        foreach (var shared in wiresByRoute.Values)
-            if (shared.Length > 1)
-                for (var i = 0; i < shared.Length; i++) wireOffsets.TryAdd(shared[i].Id, (i - (shared.Length - 1) / 2.0) * .8);
-        var materialsByBranch = project.Assembly.Materials.Where(m => m.BranchId is not null).ToLookup(m => m.BranchId!);
-        var cablesById = project.Assembly.Cables.GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First());
-        var twistByWire = project.Assembly.TwistGroups.SelectMany(t => t.ConductorIds.Select(id => (id, twist: t)))
-            .GroupBy(x => x.id).ToDictionary(g => g.Key, g => g.First().twist);
+        var splices = lookups.Splices.ById;
+        var conductors = lookups.Wires.Items.ById;
+        var wiresByBranch = lookups.Wires.ByBranch;
+        var wireOffsets = lookups.Wires.Offsets;
+        var materialsByBranch = lookups.Materials.ByBranch;
+        var cablesById = lookups.Cables.ById;
+        var twistByWire = lookups.Twists.ByWire;
         bool Visible(string layer) => !layers.TryGetValue(layer, out var definition) || (definition.Visible && (!forPrint || definition.Print));
         bool Locked(string layer) => layers.TryGetValue(layer, out var definition) && definition.Locked;
         AddFrame(project, sheet, primitives);
@@ -209,7 +204,7 @@ public static partial class SceneBuilder
                 new(sheet.WidthMm * .18, sheet.HeightMm * .54), Math.Min(sheet.WidthMm / 35, 14), "#C8CDD1", true, -22) { Locked = true });
             primitives.Add(new SceneText(sheet.Id, "draft-status", "CONCEPT", new(sheet.MarginMm + 2, sheet.HeightMm - sheet.MarginMm - 2), 3.5, "#B05B28", true) { Locked = true });
         }
-        var scene = new DrawingScene(sheet.Id, sheet.WidthMm, sheet.HeightMm, draft, primitives);
+        var scene = IndexedScene(sheet, draft, primitives);
         Checkpoint("index");
         return scene;
     }

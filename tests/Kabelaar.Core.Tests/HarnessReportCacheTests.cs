@@ -112,6 +112,25 @@ public sealed class HarnessReportCacheTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public void LengthRefreshKeepsTheFirstDuplicateBranchUntilIdentityValidationIsResolved()
+    {
+        var project = DemoFactory.Create();
+        var firstBranch = project.Assembly.Branches[0];
+        var duplicate = new RouteBranch { Id = firstBranch.Id, PhysicalLengthMm = 9900 };
+        project.Assembly.Branches.Add(duplicate);
+        var cache = new HarnessReportCache();
+        var before = cache.Get(project);
+        duplicate.PhysicalLengthMm += 500;
+        Assert.Same(before, cache.Get(project));
+        firstBranch.PhysicalLengthMm += 37.25;
+        var changed = cache.Get(project);
+        AssertFresh(project, changed);
+        Assert.Equal(before.Wires[0].RouteLengthMm + 37.25, changed.Wires[0].RouteLengthMm, 8);
+        project.Assembly.Branches.Reverse();
+        AssertFresh(project, cache.Get(project));
+    }
+
+    [Fact]
     public void Actual1000WireScaledEditsPreserveExactReportsAndReuseUnaffectedRows()
     {
         var project = DemoFactory.CreateAcceptancePerformance();
@@ -119,18 +138,36 @@ public sealed class HarnessReportCacheTests(ITestOutputHelper output)
         var cache = new HarnessReportCache();
         var first = cache.Get(project);
         var elapsed = new List<double>();
+        var allocations = new List<long>();
+        var history = new CommandHistory();
         for (var i = 0; i < 12; i++)
         {
-            HarnessOperations.MoveComponent(project, view, view.Components[0],
-                view.Components[0].Position + new Point2(i % 2 == 0 ? 1 : -1, 0)).Execute();
+            var before = cache.Get(project);
+            history.Execute(HarnessOperations.MoveComponent(project, view, view.Components[0],
+                view.Components[0].Position + new Point2(i % 2 == 0 ? 1 : -1, 0)));
             var watch = Stopwatch.StartNew();
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
             var current = cache.Get(project);
+            allocations.Add(GC.GetAllocatedBytesForCurrentThread() - allocatedBefore);
             watch.Stop(); elapsed.Add(watch.Elapsed.TotalMilliseconds);
             AssertFresh(project, current);
             Assert.Same(first.Wires[999], current.Wires[999]);
+            history.Undo();
+            var undone = cache.Get(project);
+            AssertFresh(project, undone);
+            Assert.Equal(before.Wires, undone.Wires);
+            Assert.Equal(before.Bom, undone.Bom);
+            history.Redo();
+            var redone = cache.Get(project);
+            AssertFresh(project, redone);
+            Assert.Equal(current.Wires, redone.Wires);
+            Assert.Equal(current.Bom, redone.Bom);
         }
         elapsed.Sort();
         output.WriteLine($"100 connectors / 1,000 wires, exact scaled edits: cached report median {elapsed[elapsed.Count / 2]:F2} ms.");
+        output.WriteLine($"Managed allocation per length refresh: {allocations.Max()} bytes maximum.");
+        Assert.All(allocations, bytes => Assert.True(bytes < 128_000,
+            $"A length-only refresh allocated {bytes} bytes for 1,000 wires; expected less than 128 KB."));
     }
 
     private static void AssertFresh(HarnessProject project, HarnessReportSnapshot actual)

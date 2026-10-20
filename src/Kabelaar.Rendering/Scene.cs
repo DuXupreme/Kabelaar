@@ -84,13 +84,17 @@ public sealed class DrawingScene
     public SceneBounds ContentBounds { get; }
 
     public DrawingScene(string sheetId, double widthMm, double heightMm, bool isDraft, IEnumerable<ScenePrimitive> primitives)
+        : this(sheetId, widthMm, heightMm, isDraft, primitives, null) { }
+
+    internal DrawingScene(string sheetId, double widthMm, double heightMm, bool isDraft,
+        IEnumerable<ScenePrimitive> primitives, SceneSpatialIndex? previousIndex)
     {
         SheetId = sheetId; WidthMm = widthMm; HeightMm = heightMm; IsDraft = isDraft;
         Primitives = primitives.ToArray();
         var bounds = Bounds;
         foreach (var primitive in Primitives) bounds = bounds.Union(primitive.Bounds);
         ContentBounds = bounds;
-        Index = new SceneSpatialIndex(Primitives);
+        Index = new SceneSpatialIndex(Primitives, previousIndex);
     }
 }
 
@@ -98,16 +102,53 @@ public sealed class DrawingScene
 public sealed class SceneSpatialIndex
 {
     private readonly IReadOnlyList<ScenePrimitive> _primitives;
-    private readonly Dictionary<(int X, int Y), List<int>> _cells = [];
-    private readonly List<int> _large = [];
+    // These base collections are immutable after construction and may be shared by later indexes.
+    private readonly Dictionary<(int X, int Y), List<int>> _cells;
+    private readonly List<int> _large;
+    private readonly SceneBounds[] _baseBounds;
+    private readonly int[] _changed;
     private const double CellSize = 25;
 
     public SceneSpatialIndex(IReadOnlyList<ScenePrimitive> primitives)
+        : this(primitives, null) { }
+
+    /// <summary>Reuses an immutable grid when only a bounded number of primitive bounds changed.</summary>
+    /// <remarks>The primitive list and its contents must remain unchanged for the lifetime of this index.</remarks>
+    public SceneSpatialIndex(IReadOnlyList<ScenePrimitive> primitives, SceneSpatialIndex? previousIndex)
     {
+        ArgumentNullException.ThrowIfNull(primitives);
         _primitives = primitives;
+        if (previousIndex is not null && previousIndex._baseBounds.Length == primitives.Count)
+        {
+            var limit = Math.Min(256, Math.Max(8, primitives.Count / 4));
+            List<int>? changed = null;
+            for (var i = 0; i < primitives.Count; i++)
+            {
+                // Compare to the original grid, not the preceding scene: earlier moves still need
+                // to be queried even when this particular edit did not move them again.
+                if (primitives[i].Bounds == previousIndex._baseBounds[i]) continue;
+                (changed ??= []).Add(i);
+                if (changed.Count > limit) break;
+            }
+            if (changed is null || changed.Count <= limit)
+            {
+                _cells = previousIndex._cells;
+                _large = previousIndex._large;
+                _baseBounds = previousIndex._baseBounds;
+                _changed = changed?.ToArray() ?? [];
+                return;
+            }
+        }
+
+        // A fresh base prevents unbounded overlays. No reference to a previous index is retained.
+        _cells = [];
+        _large = [];
+        _baseBounds = new SceneBounds[primitives.Count];
+        _changed = [];
         for (var i = 0; i < primitives.Count; i++)
         {
             var b = primitives[i].Bounds;
+            _baseBounds[i] = b;
             var (x0, y0, x1, y1) = Cells(b);
             if ((long)(x1 - x0 + 1) * (y1 - y0 + 1) > 1024) { _large.Add(i); continue; }
             for (var x = x0; x <= x1; x++)
@@ -127,6 +168,7 @@ public sealed class SceneSpatialIndex
         if ((long)(x1 - x0 + 1) * (y1 - y0 + 1) > 10000)
             return _primitives.Where(p => p.Bounds.Intersects(bounds)).ToArray();
         var indices = new HashSet<int>(_large);
+        indices.UnionWith(_changed);
         for (var x = x0; x <= x1; x++)
             for (var y = y0; y <= y1; y++)
                 if (_cells.TryGetValue((x, y), out var cell)) indices.UnionWith(cell);

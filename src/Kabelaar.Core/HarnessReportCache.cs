@@ -38,8 +38,16 @@ public sealed class HarnessReportCache
         for (var i = 0; i < _lengths.Length; i++)
             if (!_lengths[i].Equals(project.Assembly.Branches[i].PhysicalLengthMm)) { lengthChanged = true; break; }
         if (!lengthChanged) return _snapshot;
-        var nextLengths = project.Assembly.Branches.Select(b => b.PhysicalLengthMm).ToArray();
-        var lengths = project.Assembly.Branches.GroupBy(b => b.Id).ToDictionary(g => g.Key, g => g.First().PhysicalLengthMm);
+        var branches = project.Assembly.Branches;
+        var nextLengths = new double[branches.Count];
+        var lengths = new Dictionary<string, double>(branches.Count, StringComparer.Ordinal);
+        for (var i = 0; i < branches.Count; i++)
+        {
+            nextLengths[i] = branches[i].PhysicalLengthMm;
+            // Match the report functions' existing GroupBy(...).First() behavior
+            // even while a malformed duplicate identity is awaiting validation.
+            lengths.TryAdd(branches[i].Id, branches[i].PhysicalLengthMm);
+        }
         WireRow[]? changedWires = null;
         var looseWireCutChanged = false;
         foreach (var wire in project.Assembly.Conductors)
@@ -62,7 +70,7 @@ public sealed class HarnessReportCache
         IReadOnlyList<BomRow> bom = _snapshot.Bom;
         if (looseWireCutChanged)
         {
-            var quantities = HarnessReports.BomQuantities(project);
+            var quantities = HarnessReports.BomQuantities(project, lengths);
             BomRow[]? changedBom = null;
             for (var i = 0; i < bom.Count; i++)
             {

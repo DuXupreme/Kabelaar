@@ -87,7 +87,8 @@ public static class HarnessReports
     }
 
     // Same contribution order as Bom, without rebuilding labels, groups or reference text.
-    internal static Dictionary<(string PartId, string Unit), double> BomQuantities(HarnessProject project)
+    internal static Dictionary<(string PartId, string Unit), double> BomQuantities(HarnessProject project,
+        IReadOnlyDictionary<string, double>? knownBranchLengths = null)
     {
         var totals = new Dictionary<(string PartId, string Unit), double>();
         void Add(string? id, double quantity, string unit)
@@ -105,7 +106,8 @@ public static class HarnessReports
         }
         foreach (var splice in project.Assembly.Splices) Add(splice.PartId, 1, "st");
         foreach (var cable in project.Assembly.Cables) Add(cable.PartId, cable.CutLengthMm / 1000, "m");
-        var lengths = project.Assembly.Branches.GroupBy(b => b.Id).ToDictionary(g => g.Key, g => g.First().PhysicalLengthMm);
+        var lengths = knownBranchLengths ??
+            project.Assembly.Branches.GroupBy(b => b.Id).ToDictionary(g => g.Key, g => g.First().PhysicalLengthMm);
         foreach (var wire in project.Assembly.Conductors)
         {
             if (wire.CableId is not null) continue;
