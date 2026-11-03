@@ -54,6 +54,8 @@ public static class HarnessRouteOperations
         var cavities = new List<(Cavity Cavity, CavityState Before)>();
         foreach (var endpoint in new[] { conductor.From, conductor.To })
         {
+            if (!Enum.IsDefined(endpoint.Kind) || endpoint.Kind is EndpointKind.Splice or EndpointKind.ReferencePoint && endpoint.CavityId is not null)
+                throw new InvalidOperationException("Het draadeinde heeft een ongeldige aansluitsoort of pinverwijzing.");
             if (endpoint.Kind == EndpointKind.Cavity)
             {
                 var cavity = project.Assembly.Connectors.Find(c => c.Id == endpoint.EntityId)?.Cavities.Find(c => c.Id == endpoint.CavityId)
@@ -62,6 +64,8 @@ public static class HarnessRouteOperations
             }
             else if (endpoint.Kind == EndpointKind.Splice && !project.Assembly.Splices.Any(s => s.Id == endpoint.EntityId))
                 throw new InvalidOperationException("Een splice van de nieuwe ader ontbreekt.");
+            else if (endpoint.Kind == EndpointKind.ReferencePoint && !project.Assembly.ReferencePoints.Any(s => s.Id == endpoint.EntityId))
+                throw new InvalidOperationException("Een referentiepunt van de nieuwe ader ontbreekt.");
             else if (endpoint.Kind == EndpointKind.Free && (endpoint.EntityId is not null || endpoint.CavityId is not null))
                 throw new InvalidOperationException("Een vrij uiteinde bevat nog een aansluitverwijzing.");
         }

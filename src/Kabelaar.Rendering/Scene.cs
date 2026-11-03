@@ -56,7 +56,7 @@ public sealed record ScenePath(
 public sealed record SceneText(
     string EntityId, string Category, string Text, Point2 Position,
     double HeightMm = 3, string Color = "#243244", bool Bold = false,
-    double RotationDegrees = 0, double? MaxWidthMm = null)
+    double RotationDegrees = 0, double? MaxWidthMm = null, TableCellAlignment Alignment = TableCellAlignment.Left)
     : ScenePrimitive(EntityId, Category, SceneBounds.TextBounds(Text, Position, HeightMm, RotationDegrees, MaxWidthMm));
 
 public sealed record SceneEllipse(
@@ -69,8 +69,11 @@ public sealed record SceneArc(
     double StartDegrees, double SweepDegrees, string Stroke = "#243244", double StrokeWidth = 0.25)
     : ScenePrimitive(EntityId, Category, new(Center.X - Radius, Center.Y - Radius, Radius * 2, Radius * 2));
 
-public sealed record SceneImage(string EntityId, string Category, byte[] Data, SceneBounds ImageBounds)
-    : ScenePrimitive(EntityId, Category, ImageBounds);
+public sealed record SceneImage(string EntityId, string Category, byte[] Data, SceneBounds ImageBounds, double RotationDegrees = 0)
+    : ScenePrimitive(EntityId, Category, Math.Abs(RotationDegrees) < 1e-12 ? ImageBounds :
+        SceneBounds.Around(new[] { new Point2(), new Point2(ImageBounds.Width, 0),
+            new Point2(ImageBounds.Width, ImageBounds.Height), new Point2(0, ImageBounds.Height) }
+            .Select(p => Geometry.Transform(p, RotationDegrees, new(ImageBounds.X, ImageBounds.Y)))));
 
 public sealed class DrawingScene
 {

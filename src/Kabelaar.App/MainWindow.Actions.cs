@@ -83,8 +83,9 @@ public partial class MainWindow
         { Status("Ontgrendel eerst de geselecteerde objecten of hun laag voordat je ze verwijdert."); return; }
         var selectedConnectors = _project.Assembly.Connectors.Where(c => ids.Contains(c.Id)).ToArray();
         var selectedSplices = _project.Assembly.Splices.Where(s => ids.Contains(s.Id)).ToArray();
+        var selectedReferences = _project.Assembly.ReferencePoints.Where(s => ids.Contains(s.Id)).ToArray();
         var selectedWires = _project.Assembly.Conductors.Where(w => ids.Contains(w.Id)).ToArray();
-        var hasPhysical = selectedConnectors.Length + selectedSplices.Length + selectedWires.Length > 0;
+        var hasPhysical = selectedConnectors.Length + selectedSplices.Length + selectedWires.Length + selectedReferences.Length > 0;
         var physical = false;
         if (hasPhysical)
         {
@@ -98,7 +99,7 @@ public partial class MainWindow
         var selectedBranches = selectedWires.SelectMany(w => w.BranchIds).Concat(ids).ToHashSet();
         if (physical)
         {
-            var entityIds = selectedConnectors.Select(c => c.Id).Concat(selectedSplices.Select(s => s.Id)).ToHashSet();
+            var entityIds = selectedConnectors.Select(c => c.Id).Concat(selectedSplices.Select(s => s.Id)).Concat(selectedReferences.Select(s => s.Id)).ToHashSet();
             foreach (var wire in _project.Assembly.Conductors.Except(selectedWires))
             {
                 var from = wire.From.EntityId is not null && entityIds.Contains(wire.From.EntityId) ? new Endpoint { Description = "Vrij na verwijderen onderdeel" } : wire.From;
@@ -125,6 +126,12 @@ public partial class MainWindow
             }
             foreach (var connector in selectedConnectors) commands.Add(RemoveItem("Connector verwijderen", _project.Assembly.Connectors, connector));
             foreach (var splice in selectedSplices) commands.Add(RemoveItem("Splice verwijderen", _project.Assembly.Splices, splice));
+            foreach (var reference in selectedReferences) commands.Add(RemoveItem("Referentiepunt verwijderen", _project.Assembly.ReferencePoints, reference));
+            foreach (var connector in _project.Assembly.Connectors.Except(selectedConnectors).Where(c => c.MatingConnectorId is not null && entityIds.Contains(c.MatingConnectorId)))
+            {
+                var before = connector.MatingConnectorId;
+                commands.Add(new DelegateCommand("Tegenconnectorreferentie verwijderen", () => connector.MatingConnectorId = null, () => connector.MatingConnectorId = before));
+            }
             foreach (var view in _project.Sheets.SelectMany(s => s.Views))
             {
                 foreach (var p in view.Components.Where(p => entityIds.Contains(p.EntityId)).ToArray()) commands.Add(RemoveItem("Weergave verwijderen", view.Components, p));
@@ -162,26 +169,18 @@ public partial class MainWindow
         foreach (var a in _view.Annotations.Where(a => ids.Contains(a.Id)).ToArray())
             commands.Add(RemoveItem("Annotatie verwijderen", _view.Annotations, a));
         if (commands.Count == 0) return;
+        var oldOrders = _project.Sheets.SelectMany(s => s.Views).ToDictionary(v => v, v => v.DrawOrder.ToList());
+        commands.Add(new DelegateCommand("Tekenvolgorde bijwerken", () =>
+        {
+            foreach (var view in oldOrders.Keys)
+            {
+                var available = view.Components.Select(p => p.EntityId).Concat(view.Components.Select(p => p.Id))
+                    .Concat(view.Annotations.Select(a => a.Id)).Concat(view.Routes.Select(r => r.Id)).Concat(view.Routes.Select(r => r.BranchId))
+                    .Concat(_project.Assembly.Conductors.Where(w => view.Routes.Any(r => w.BranchIds.Contains(r.BranchId))).Select(w => w.Id)).ToHashSet();
+                view.DrawOrder.RemoveAll(id => !available.Contains(id));
+            }
+        }, () => { foreach (var pair in oldOrders) pair.Key.DrawOrder = pair.Value.ToList(); }));
         Execute(new CompositeCommand("Selectie verwijderen", commands.ToArray())); Canvas.ClearSelection();
     }
-    private void Duplicate_Click(object sender, RoutedEventArgs e)
-    {
-        var connector = _project.Assembly.Connectors.Find(c => c.Id == SelectedId);
-        var placement = _view.Components.Find(c => c.EntityId == SelectedId);
-        if (connector is not null && placement is not null)
-        {
-            var copy = EditData.Clone(connector); copy.Id = Ids.New(); copy.Name = NextName("J", _project.Assembly.Connectors.Select(c => c.Name));
-            foreach (var cavity in copy.Cavities) { cavity.Id = Ids.New(); if (cavity.State == CavityState.Occupied) cavity.State = CavityState.Unspecified; }
-            foreach (var material in copy.Accessories) material.Id = Ids.New();
-            Execute(HarnessOperations.AddConnector(_project, _view, copy, placement.Position + new Point2(20, 20)));
-            Canvas.Select(copy.Id); return;
-        }
-        var annotation = _view.Annotations.Find(a => a.Id == SelectedId);
-        if (annotation is not null)
-        {
-            var copy = EditData.Clone(annotation); copy.Id = Ids.New(); copy.Points = copy.Points.Select(p => p + new Point2(10, 10)).ToList();
-            Add("Annotatie dupliceren", _view.Annotations, copy); Canvas.Select(copy.Id); return;
-        }
-        Status("Selecteer een connector of annotatie om te dupliceren. Gebruik een detailaanzicht om dezelfde assemblage opnieuw af te beelden.");
-    }
+    private void Duplicate_Click(object sender, RoutedEventArgs e) => DuplicateSelection();
 }

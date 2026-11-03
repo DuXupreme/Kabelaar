@@ -152,6 +152,8 @@ public sealed class HarnessReportCache
         }
         state.Add(assembly.Splices.Count);
         foreach (var splice in assembly.Splices) { state.Add(splice.Id); state.Add(splice.Name); state.Add(splice.PartId); }
+        state.Add(assembly.ReferencePoints.Count);
+        foreach (var point in assembly.ReferencePoints) { state.Add(point.Id); state.Add(point.Name); }
         state.Add(assembly.Cables.Count);
         foreach (var cable in assembly.Cables)
         {
@@ -165,6 +167,7 @@ public sealed class HarnessReportCache
         {
             state.Add(wire.Id); state.Add(wire.Name); state.Add(wire.WirePartId); state.Add(wire.ColorCode); state.Add(wire.CrossSectionMm2);
             state.Add(wire.Signal); state.Add(wire.CableId); state.Add((int)wire.LengthSource);
+            state.Add(wire.NetName); state.Add(wire.Shielding);
             state.Add(wire.ManualCutLengthMm); state.Add(wire.StartAllowanceMm); state.Add(wire.EndAllowanceMm); state.Add(wire.ProcessingAllowanceMm);
             Endpoint(wire.From, ref state); Endpoint(wire.To, ref state);
             state.Add(wire.BranchIds.Count);
@@ -174,6 +177,7 @@ public sealed class HarnessReportCache
     private static void Endpoint(Endpoint endpoint, ref Cursor state)
     {
         state.Add((int)endpoint.Kind); state.Add(endpoint.EntityId); state.Add(endpoint.CavityId); state.Add(endpoint.Description);
+        state.Add(endpoint.Notes);
     }
     private static void Materials(List<MaterialItem> materials, ref Cursor state)
     {

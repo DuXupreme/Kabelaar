@@ -45,6 +45,9 @@ public partial class MainWindow : Window
     {
         _sheet = _project.Sheets[0]; _view = _sheet.Views[0];
         InitializeComponent();
+        InitializeWorkspace();
+        ApplyNewViewDefaults(_view);
+        Canvas.ContextRequested += ShowCanvasContextMenu;
         MinWidth = Math.Min(MinWidth, SystemParameters.WorkArea.Width);
         MinHeight = Math.Min(MinHeight, SystemParameters.WorkArea.Height);
         Width = Math.Min(Width, SystemParameters.WorkArea.Width);
@@ -212,7 +215,7 @@ public partial class MainWindow : Window
         var signature = filter + "|" + _project.Id + string.Join("|", _project.Parts.Select(p => p.Id + p.Revision + p.Name + p.PartNumber + p.Supplier + p.Kind));
         if (signature == _librarySignature) return;
         _librarySignature = signature;
-        LibraryList.ItemsSource = _project.Parts.Where(p => $"{p.Name} {p.PartNumber} {p.Supplier} {p.Kind}"
+        LibraryList.ItemsSource = _project.Parts.Where(IsLibraryPartVisible).Where(p => $"{p.Name} {p.PartNumber} {p.Supplier} {p.Kind}"
             .Contains(filter, StringComparison.OrdinalIgnoreCase)).OrderBy(p => p.Kind).ThenBy(p => p.Name).ToArray();
         LibraryList.SelectedItem = _project.Parts.Find(p => p.Id == id);
     }
@@ -300,6 +303,7 @@ public partial class MainWindow : Window
                 case Key.Z when !input: Undo_Click(this, e); break;
                 case Key.Y when !input: Redo_Click(this, e); break;
                 case Key.D when !input: Duplicate_Click(this, e); break;
+                case Key.V when !input: Paste_Click(this, e); break;
                 default: return;
             }
             e.Handled = true; return;

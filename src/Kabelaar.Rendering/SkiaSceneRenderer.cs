@@ -202,6 +202,13 @@ public static class SkiaSceneRenderer
                     canvas.Save();
                     canvas.Translate((float)text.Position.X, (float)text.Position.Y);
                     if (Math.Abs(text.RotationDegrees) > .001) canvas.RotateDegrees((float)text.RotationDegrees);
+                    if (text.MaxWidthMm is { } available && measuredWidth < available)
+                        canvas.Translate(text.Alignment switch
+                        {
+                            TableCellAlignment.Center => (float)((available - measuredWidth) / 2),
+                            TableCellAlignment.Right => (float)(available - measuredWidth),
+                            _ => 0
+                        }, 0);
                     if (text.MaxWidthMm is { } maxWidth && measuredWidth > maxWidth && measuredWidth > 0)
                         canvas.Scale((float)(maxWidth / measuredWidth), 1);
                     if (textAsPaths)
@@ -227,21 +234,26 @@ public static class SkiaSceneRenderer
                     canvas.DrawArc(Rect(arc.Bounds), (float)arc.StartDegrees, (float)arc.SweepDegrees, false, stroke);
                 break;
             case SceneImage image:
+                canvas.Save();
+                canvas.Translate((float)image.ImageBounds.X, (float)image.ImageBounds.Y);
+                canvas.RotateDegrees((float)image.RotationDegrees);
+                var imageRect = new SKRect(0, 0, (float)image.ImageBounds.Width, (float)image.ImageBounds.Height);
                 using (var bitmap = DecodeImage(image.Data))
                 {
                     if (bitmap is not null)
                     {
                         using var paint = new SKPaint { IsAntialias = true };
                         using var skImage = SKImage.FromBitmap(bitmap);
-                        canvas.DrawImage(skImage, Rect(image.Bounds), new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None), paint);
+                        canvas.DrawImage(skImage, imageRect, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.None), paint);
                     }
                     else
                     {
                         using var error = Paint("#B55435", .3);
-                        canvas.DrawRect(Rect(image.Bounds), error);
-                        canvas.DrawLine((float)image.Bounds.Left, (float)image.Bounds.Top, (float)image.Bounds.Right, (float)image.Bounds.Bottom, error);
+                        canvas.DrawRect(imageRect, error);
+                        canvas.DrawLine(0, 0, imageRect.Right, imageRect.Bottom, error);
                     }
                 }
+                canvas.Restore();
                 break;
         }
     }

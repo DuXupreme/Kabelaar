@@ -148,6 +148,12 @@ internal sealed class FormDialog : Window
         Owner = owner; Title = title; Width = Math.Min(width, SystemParameters.WorkArea.Width); MaxHeight = Math.Min(800, SystemParameters.WorkArea.Height);
         SizeToContent = SizeToContent.Height; WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ShowInTaskbar = false; Background = Brushes.White;
+        if (owner.Resources.Contains(typeof(TextBox)))
+        {
+            foreach (System.Collections.DictionaryEntry entry in owner.Resources)
+                if (entry.Key is Type && entry.Value is Style) Resources[entry.Key] = entry.Value;
+            Background = new SolidColorBrush(Color.FromRgb(30, 38, 49));
+        }
         var dock = new DockPanel { Margin = new(20) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right, Margin = new(0, 18, 0, 0) };
         var cancel = new Button { Content = "Annuleren", IsCancel = true, MinWidth = 90 };

@@ -41,6 +41,7 @@ public partial class MainWindow
             await CheckPresentationEditingAsync(Check);
             await CheckRestoredEditingAsync(output, Check);
             await CheckGeometryMovesAsync(Check);
+            await CheckExtendedEditingAsync(output, Check);
             var wire = _project.Assembly.Conductors[0];
             Canvas.Select(wire.Id);
             Check(WireGrid.SelectedItem is WireDisplay row && row.Id == wire.Id, "Tekeningselectie koppelt naar aansluitlijst");

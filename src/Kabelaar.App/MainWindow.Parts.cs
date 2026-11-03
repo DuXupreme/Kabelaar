@@ -9,6 +9,54 @@ namespace Kabelaar.App;
 
 public partial class MainWindow
 {
+    private async void DeleteLibraryPart_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy is not null || _saving || SelectedPart is not { } part) return;
+        await _librarySaveGate.WaitAsync();
+        try
+        {
+            // Retain the definition before hiding it, including its embedded CAD asset.
+            // Project saves may merge it again, but the separate tombstone remains authoritative.
+            await _libraries.MergeCatalogAsync([part], _project.Assets, _userLibrary);
+            await _libraries.SetDeletedAsync(_userLibrary, part.Id, true);
+            _deletedLibraryIds.Add(part.Id); _librarySignature = ""; RefreshLibrary();
+            Status($"{part.Name} uit de bibliotheek verwijderd. Bestaande projecten behouden het onderdeel; herstellen blijft mogelijk.");
+        }
+        catch (Exception error) { App.Log(error); MessageBox.Show(this, error.Message, "Onderdeel niet verwijderd"); }
+        finally { _librarySaveGate.Release(); }
+    }
+
+    private async void RestoreLibraryPart_Click(object sender, RoutedEventArgs e)
+    {
+        if (_busy is not null || _saving) return;
+        try
+        {
+            _deletedLibraryIds = _libraries.GetDeletedPartIds(_userLibrary);
+            var catalog = File.Exists(_userLibrary) ? (await _store.LoadAsync(_userLibrary)).Project : new HarnessProject();
+            var candidates = _project.Parts.Concat(catalog.Parts).DistinctBy(p => p.Id)
+                .Where(p => _deletedLibraryIds.Contains(p.Id)).OrderBy(p => p.Name).ToArray();
+            if (candidates.Length == 0) { Status("Er zijn geen verwijderde bibliotheekonderdelen om te herstellen."); return; }
+            var dialog = new FormDialog(this, "Bibliotheekonderdeel herstellen");
+            var choice = dialog.Form.Choice("Onderdeel", candidates, candidates[0], p => $"{p.PartNumber} · {p.Name} · revisie {p.Revision}");
+            if (dialog.ShowDialog() != true) return;
+            var part = PropertyForm.Value<PartDefinition>(choice);
+            var asset = catalog.Assets.Find(a => a.Id == part.SourceAssetId);
+            var addPart = !_project.Parts.Any(p => p.Id == part.Id);
+            var addAsset = asset is not null && !_project.Assets.Any(a => a.Id == asset.Id);
+            await _librarySaveGate.WaitAsync();
+            try { await _libraries.SetDeletedAsync(_userLibrary, part.Id, false); }
+            finally { _librarySaveGate.Release(); }
+            _deletedLibraryIds.Remove(part.Id);
+            if (addPart)
+                Execute(new DelegateCommand("Bibliotheekonderdeel beschikbaar maken",
+                    () => { _project.Parts.Add(part); if (addAsset) _project.Assets.Add(asset!); },
+                    () => { _project.Parts.Remove(part); if (addAsset) _project.Assets.Remove(asset!); }));
+            _librarySignature = ""; RefreshLibrary(); LibraryList.SelectedItem = _project.Parts.Find(p => p.Id == part.Id);
+            Status($"{part.Name} is hersteld in de bibliotheek.");
+        }
+        catch (Exception error) { App.Log(error); MessageBox.Show(this, error.Message, "Onderdeel niet hersteld"); }
+    }
+
     private async void AddPart_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new PartEditorWindow(this, new());
@@ -140,8 +188,8 @@ public partial class MainWindow
         {
             var changed = after.Pins.Find(p => p.Id == pin.Id);
             if (changed is null) changes.Add($"Pin {pin.Label}: verwijderd");
-            else if (pin.Position != changed.Position || pin.Label != changed.Label || pin.MaxWires != changed.MaxWires)
-                changes.Add($"Pin {pin.Label} → {changed.Label}: ({pin.Position.X:g}, {pin.Position.Y:g}) → ({changed.Position.X:g}, {changed.Position.Y:g}) mm, capaciteit {pin.MaxWires} → {changed.MaxWires}");
+            else if (pin.Position != changed.Position || pin.Label != changed.Label || pin.MaxWires != changed.MaxWires || pin.Function != changed.Function)
+                changes.Add($"Pin {pin.Label} → {changed.Label}: ({pin.Position.X:g}, {pin.Position.Y:g}) → ({changed.Position.X:g}, {changed.Position.Y:g}) mm, capaciteit {pin.MaxWires} → {changed.MaxWires}, functie {Text(pin.Function)} → {Text(changed.Function)}");
         }
         foreach (var pin in after.Pins.Where(p => !previousPinIds.Contains(p.Id)))
             changes.Add($"Pin {pin.Label}: toegevoegd op ({pin.Position.X:g}, {pin.Position.Y:g}) mm, capaciteit {pin.MaxWires}");
@@ -157,6 +205,7 @@ public partial class MainWindow
         foreach (var connector in _project.Assembly.Connectors)
         {
             Ref(connector.PartId, v => connector.PartId = v);
+            Ref(connector.MatingPartId, v => connector.MatingPartId = v);
             foreach (var cavity in connector.Cavities)
             {
                 Ref(cavity.TerminalPartId, v => cavity.TerminalPartId = v);
@@ -180,6 +229,7 @@ public partial class MainWindow
             {
                 var prior = c.Cavities.Find(x => pinMap.GetValueOrDefault(x.PinDefinitionId) == pin.Id);
                 var cavity = prior is null ? new Cavity() : EditData.Clone(prior);
+                if (prior is null) cavity.Function = pin.Function;
                 cavity.PinDefinitionId = pin.Id; cavity.Label = pin.Label; cavity.MaxWires = Math.Min(cavity.MaxWires, pin.MaxWires);
                 after.Add(cavity);
             }

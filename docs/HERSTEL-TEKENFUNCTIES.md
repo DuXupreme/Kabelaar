@@ -44,24 +44,31 @@ opgedragen: eerst deze voortgang en de bestaande broncommits met GitHub
 synchroniseren, daarna punten 8–25 uitvoeren. Alle werkzaamheden en controles
 blijven op de achtergrond, zonder desktopovername.
 
-- [ ] 8. Vrij draadlabel.
-- [ ] 9. Parallelle kopieën met aantal/afstand en voorstel.
-- [ ] 10. Visuele oversteekbogen.
-- [ ] 11. Contextmenu's.
-- [ ] 12. Meer snapdoelen en eigen endpoint-schakelaar.
-- [ ] 13. Zelfstandige herbruikbare selectieblokken.
-- [ ] 14. Ader/splice dupliceren.
-- [ ] 15. Spiegelen, roteren en tekenvolgorde.
-- [ ] 16. Label/leaderhandvatten, pijlgrootte en tekstkader.
-- [ ] 17. Vrije tabellen en opmaak van gekoppelde tabellen.
-- [ ] 18. Tekst/afbeeldingen plakken.
-- [ ] 19. Uitgebreid titelblok en bladzones.
-- [ ] 20. Pinfunctie, netnaam, afscherming, tegenonderdelen, aansluitnotities.
-- [ ] 21. Vrije STEP-previewcamera.
-- [ ] 22. Bibliotheekverwijdering met herstel.
-- [ ] 23. Panelen, thema, interfaceschaal en nieuwe-objectstandaarden.
-- [ ] 24. Bevestigbare verbindings- en aftakkingsvoorstellen.
-- [ ] 25. Grafische knopen en fysieke aansluitbare referentiepunten.
+GitHub-synchronisatie afgerond op 3 november 2026: broncode en bijgewerkt plan
+staan op d416a9ff34592db3f541a643fbede15061d55b74 (main), rechtstreeks op GitHub
+gecontroleerd vóór de start van 0.9.4.
+
+De onderstaande functies zijn geïmplementeerd. De definitieve releasecontrole
+(inclusief prestatiemeting), verpakking en installatie blijven aparte voorwaarden.
+
+- [x] 8. Vrij draadlabel.
+- [x] 9. Parallelle kopieën met aantal/afstand en voorstel.
+- [x] 10. Visuele oversteekbogen.
+- [x] 11. Contextmenu's.
+- [x] 12. Meer snapdoelen en eigen endpoint-schakelaar.
+- [x] 13. Zelfstandige herbruikbare selectieblokken.
+- [x] 14. Ader/splice dupliceren.
+- [x] 15. Spiegelen, roteren en tekenvolgorde.
+- [x] 16. Label/leaderhandvatten, pijlgrootte en tekstkader.
+- [x] 17. Vrije tabellen en opmaak van gekoppelde tabellen.
+- [x] 18. Tekst/afbeeldingen plakken.
+- [x] 19. Uitgebreid titelblok en bladzones.
+- [x] 20. Pinfunctie, netnaam, afscherming, tegenonderdelen, aansluitnotities.
+- [x] 21. Vrije STEP-previewcamera.
+- [x] 22. Bibliotheekverwijdering met herstel.
+- [x] 23. Panelen, thema, interfaceschaal en nieuwe-objectstandaarden.
+- [x] 24. Bevestigbare verbindings- en aftakkingsvoorstellen.
+- [x] 25. Grafische knopen en fysieke aansluitbare referentiepunten.
 - [ ] Schema 4, migraties, regressies en exports getest.
 - [ ] Verborgen WPF-ketentest en prestatiedrempels geslaagd.
 - [ ] Geteste commit verpakt, upgrade en portable gecontroleerd, geïnstalleerd.

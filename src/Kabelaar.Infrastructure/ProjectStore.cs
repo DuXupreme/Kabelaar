@@ -49,7 +49,10 @@ public sealed class ProjectStore
     private sealed record AssetEntry(string Id, string FileName, string MediaType, string Entry, string Sha256);
     private sealed record Manifest(string Format, int Version, string ProjectEntry, List<AssetEntry> Assets);
 
-    public async Task<LoadedProject> LoadAsync(string path, CancellationToken cancellationToken = default)
+    public Task<LoadedProject> LoadAsync(string path, CancellationToken cancellationToken = default) =>
+        LoadPackageAsync(path, "Kabelaar.Project", cancellationToken);
+
+    internal async Task<LoadedProject> LoadPackageAsync(string path, string format, CancellationToken cancellationToken = default)
     {
         await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, true);
         var fingerprint = Convert.ToHexString(await SHA256.HashDataAsync(stream, cancellationToken));
@@ -67,7 +70,7 @@ public sealed class ProjectStore
                     throw new ProjectFormatException("Het project is te groot om veilig te openen (maximaal 512 MB).");
             }
             var manifest = await ReadJsonAsync<Manifest>(zip, "manifest.json", cancellationToken);
-            if (manifest.Format != "Kabelaar.Project" || manifest.Version != 1)
+            if (manifest.Format != format || manifest.Version != 1)
                 throw new ProjectFormatException("Dit projectformaat is onbekend of vereist een nieuwere Kabelaar-versie.");
             var project = await ReadProjectAsync(zip, manifest.ProjectEntry, cancellationToken);
             if (project.SchemaVersion != HarnessProject.CurrentSchemaVersion)
@@ -98,7 +101,11 @@ public sealed class ProjectStore
         }
     }
 
-    public async Task<string> SaveAsync(HarnessProject project, string path, string? expectedFingerprint = null,
+    public Task<string> SaveAsync(HarnessProject project, string path, string? expectedFingerprint = null,
+        CancellationToken cancellationToken = default) =>
+        SavePackageAsync(project, path, "Kabelaar.Project", expectedFingerprint, cancellationToken);
+
+    internal async Task<string> SavePackageAsync(HarnessProject project, string path, string format, string? expectedFingerprint = null,
         CancellationToken cancellationToken = default)
     {
         ValidateStructure(project);
@@ -129,7 +136,7 @@ public sealed class ProjectStore
                     }
                     await using (var data = zip.CreateEntry("project.json", CompressionLevel.Optimal).Open())
                         await data.WriteAsync(projectBytes, cancellationToken);
-                    await WriteJsonAsync(zip, "manifest.json", new Manifest("Kabelaar.Project", 1, "project.json", assets), cancellationToken);
+                    await WriteJsonAsync(zip, "manifest.json", new Manifest(format, 1, "project.json", assets), cancellationToken);
                 }
                 await stream.FlushAsync(cancellationToken);
                 stream.Flush(true);
@@ -235,8 +242,61 @@ public sealed class ProjectStore
                                     if (!route.ContainsKey("geometry")) route["geometry"] = null;
                         }
         }
+        if (version <= 3) MigrateSchemaFour(upgraded);
         upgraded["schemaVersion"] = HarnessProject.CurrentSchemaVersion;
         return upgraded.Deserialize<HarnessProject>(LoadOptions) ?? throw new ProjectFormatException("Het projectbestand is leeg.");
+    }
+    private static void MigrateSchemaFour(JsonObject project)
+    {
+        // Only fields introduced in schema 4 get defaults. Existing malformed or
+        // explicitly null fields stay untouched and are rejected by the normal loader.
+        static void Add<T>(JsonObject node, string key, T value)
+        {
+            if (!node.ContainsKey(key)) node[key] = JsonSerializer.SerializeToNode(value, JsonOptions);
+        }
+        static IEnumerable<JsonObject> Objects(JsonObject node, string key) =>
+            node[key] is JsonArray array ? array.OfType<JsonObject>() : [];
+        if (project["assembly"] is JsonObject assembly)
+        {
+            Add(assembly, "referencePoints", new JsonArray());
+            foreach (var connector in Objects(assembly, "connectors"))
+            {
+                Add<string?>(connector, "matingPartId", null); Add<string?>(connector, "matingConnectorId", null);
+                foreach (var cavity in Objects(connector, "cavities")) { Add(cavity, "function", ""); Add(cavity, "notes", ""); }
+            }
+            foreach (var wire in Objects(assembly, "conductors"))
+            {
+                Add(wire, "netName", ""); Add(wire, "shielding", ""); Add(wire, "lengthNeedsConfirmation", false);
+                foreach (var key in new[] { "from", "to" })
+                    if (wire[key] is JsonObject endpoint) Add(endpoint, "notes", "");
+            }
+        }
+        foreach (var part in Objects(project, "parts"))
+            foreach (var pin in Objects(part, "pins")) Add(pin, "function", "");
+        foreach (var sheet in Objects(project, "sheets"))
+        {
+            Add(sheet, "titleBlock", new TitleBlockSettings()); Add(sheet, "zoneColumns", 0); Add(sheet, "zoneRows", 0);
+            foreach (var view in Objects(sheet, "views"))
+            {
+                Add(view, "drawOrder", new JsonArray());
+                foreach (var component in Objects(view, "components"))
+                { Add(component, "mirrorX", false); Add(component, "mirrorY", false); }
+                foreach (var presentation in Objects(view, "wirePresentations"))
+                {
+                    Add<bool?>(presentation, "showLabel", null); Add<string?>(presentation, "labelText", null);
+                    Add<Point2?>(presentation, "labelPosition", null); Add(presentation, "labelRotationDegrees", 0d);
+                    Add(presentation, "showCrossingBridges", false); Add(presentation, "crossingRadiusMm", 2d);
+                }
+                foreach (var note in Objects(view, "annotations"))
+                {
+                    Add(note, "rotationDegrees", 0d); Add(note, "arrowSizeMm", 2d); Add(note, "textFrame", false);
+                    Add(note, "fillColor", "#FFFFFF"); Add(note, "tableHeaderColor", "#E5ECEE"); Add(note, "rows", new JsonArray()); Add(note, "columnWidthsMm", new JsonArray());
+                    Add(note, "rowHeightMm", 0d); Add(note, "cellPaddingMm", 1d); Add(note, "showTableHeader", true);
+                    Add(note, "cellAlignment", TableCellAlignment.Left); Add(note, "columnAlignments", new JsonArray());
+                    Add(note, "nodeSymbol", NodeSymbol.General);
+                }
+            }
+        }
     }
     private static async Task WriteJsonAsync<T>(ZipArchive zip, string name, T value, CancellationToken token)
     {
@@ -263,6 +323,7 @@ public sealed class ProjectStore
         }
         foreach (var connector in project.Assembly.Connectors) { Unique(connector.Id); foreach (var cavity in connector.Cavities) Unique(cavity.Id); }
         foreach (var splice in project.Assembly.Splices) Unique(splice.Id);
+        foreach (var reference in project.Assembly.ReferencePoints) Unique(reference.Id);
         foreach (var conductor in project.Assembly.Conductors) Unique(conductor.Id);
         foreach (var branch in project.Assembly.Branches) { Unique(branch.Id); Finite(branch.PhysicalLengthMm); foreach (var p in branch.Points) Point(p); }
         foreach (var twist in project.Assembly.TwistGroups) Unique(twist.Id);

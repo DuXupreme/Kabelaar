@@ -42,6 +42,7 @@ public partial class MainWindow
         if (selectionState is not null && _propertiesState?.SequenceEqual(selectionState) == true)
         {
             _refreshPlacementProperties?.Invoke();
+            RefreshPresentationHandles();
             return;
         }
         _propertiesState = selectionState; _refreshPlacementProperties = null;
@@ -84,6 +85,11 @@ public partial class MainWindow
             PropertiesHeading.Text = "ROUTE";
             BuildRouteProperties(form, route);
         }
+        else if (_project.Assembly.ReferencePoints.Find(r => r.Id == id || r.Id == placement?.EntityId) is { } reference)
+        {
+            PropertiesHeading.Text = $"REFERENTIEPUNT · {reference.Name}";
+            BuildReferenceProperties(form, reference, placement);
+        }
         else
         {
             PropertiesHeading.Text = "PROJECT";
@@ -92,6 +98,7 @@ public partial class MainWindow
         if (route is not null && Canvas.Tool == EditorTool.Select && Canvas.Selection.Count == 1 &&
             _sheet.Layers.Find(l => l.Id == route.LayerId)?.Locked != true)
             RefreshGeometryHandles(wire, route);
+        RefreshPresentationHandles();
         Canvas.InvalidateVisual();
     }
 
@@ -191,6 +198,12 @@ public partial class MainWindow
         var name = form.Text("Connectornaam", connector.Name);
         var included = form.Check("Meenemen in assemblage en stuklijst", connector.IncludedInAssembly);
         var notes = form.Text("Montagenotities", connector.Notes, true);
+        var matingParts = new[] { new PropertyOption(null, "Niet opgegeven") }.Concat(_project.Parts.Where(p => p.Kind is PartKind.Housing or PartKind.RingTerminal)
+            .Select(p => new PropertyOption(p.Id, $"{p.PartNumber} · {p.Name}"))).ToArray();
+        var matingPart = form.Choice("Tegenonderdeel (referentie, geen extra materiaal)", matingParts, matingParts.FirstOrDefault(p => p.Id == connector.MatingPartId), p => p.Label);
+        var matingConnectors = new[] { new PropertyOption(null, "Niet opgegeven") }.Concat(_project.Assembly.Connectors.Where(c => c.Id != connector.Id)
+            .Select(c => new PropertyOption(c.Id, c.Name))).ToArray();
+        var matingConnector = form.Choice("Tegenconnector", matingConnectors, matingConnectors.FirstOrDefault(c => c.Id == connector.MatingConnectorId), c => c.Label);
         TextBox? x = null, y = null, angle = null, labelX = null, labelY = null;
         ComboBox? layer = null;
         ComponentPresentationFields? presentation = null;
@@ -222,6 +235,7 @@ public partial class MainWindow
         {
             var next = EditData.Clone(connector);
             next.Name = name.Text.Trim(); next.IncludedInAssembly = included.IsChecked == true; next.Notes = notes.Text;
+            next.MatingPartId = PropertyForm.Value<PropertyOption>(matingPart).Id; next.MatingConnectorId = PropertyForm.Value<PropertyOption>(matingConnector).Id;
             var commands = new List<IEditCommand>();
             if (placement is not null)
             {
@@ -263,12 +277,15 @@ public partial class MainWindow
         var seal = PartChoice(form, "Gemonteerde draadseal", cavity.SealPartId, PartKind.Seal);
         var plug = PartChoice(form, "Gemonteerde afdichtplug", cavity.PlugPartId, PartKind.Plug);
         var maxWires = form.Number("Maximaal aantal draadeinden", cavity.MaxWires);
+        var function = form.Text("Pinfunctie", cavity.Function);
+        var notes = form.Text("Aansluitnotities", cavity.Notes, true);
         var definition = _project.Parts.Find(p => p.Id == connector.PartId)?.Pins.Find(p => p.Id == cavity.PinDefinitionId);
         form.Note($"Onderdeeldefinitie: maximaal {definition?.MaxWires ?? 1} draadeind(en). Een afdichtplug kan niet naast een draad of terminal worden gemonteerd.");
         dialog.OnAccept = () =>
         {
             var next = EditData.Clone(cavity);
             next.State = PropertyForm.Value<CavityState>(state);
+            next.Function = function.Text; next.Notes = notes.Text;
             next.TerminalPartId = PropertyForm.Value<PropertyOption>(terminal).Id;
             next.SealPartId = PropertyForm.Value<PropertyOption>(seal).Id;
             next.PlugPartId = PropertyForm.Value<PropertyOption>(plug).Id;
@@ -285,14 +302,17 @@ public partial class MainWindow
     private void BuildWireProperties(PropertyForm form, Conductor wire)
     {
         BuildWireDrawingProperties(form, wire);
+        BuildWireLabelProperties(form, wire);
         form.Heading("Productiegegevens");
         var name = form.Text("Draadnummer", wire.Name);
         var fromOptions = EndpointChoices();
         var from = form.Choice("Van aansluiting", fromOptions, CurrentEndpointOption(fromOptions, wire.From), o => o.Label);
         var fromDescription = form.Text("Omschrijving vrij begin", wire.From.Description);
+        var fromNotes = form.Text("Aansluitnotitie begin", wire.From.Notes);
         var toOptions = EndpointChoices();
         var to = form.Choice("Naar aansluiting", toOptions, CurrentEndpointOption(toOptions, wire.To), o => o.Label);
         var toDescription = form.Text("Omschrijving vrij einde", wire.To.Description);
+        var toNotes = form.Text("Aansluitnotitie einde", wire.To.Notes);
         void UpdateEnds()
         {
             fromDescription.IsEnabled = PropertyForm.Value<EndpointOption>(from).Kind == EndpointKind.Free;
@@ -304,6 +324,9 @@ public partial class MainWindow
         var color = form.Color("Tekenkleur (#RRGGBB)", wire.Color);
         var section = form.Number("Doorsnede (mm²)", wire.CrossSectionMm2);
         var signal = form.Text("Signaal / functie", wire.Signal);
+        var netName = form.Text("Netnaam (geen automatische verbinding)", wire.NetName);
+        var shielding = form.Text("Afscherming", wire.Shielding);
+        var lengthConfirmed = form.Check("Kniplengte en aansluittoeslagen gecontroleerd", !wire.LengthNeedsConfirmation);
         var cableOptions = new[] { new PropertyOption(null, "Losse draad") }.Concat(_project.Assembly.Cables.Select(c => new PropertyOption(c.Id, c.Name))).ToArray();
         var cable = form.Choice("Onderdeel van kabel", cableOptions, cableOptions.FirstOrDefault(o => o.Id == wire.CableId), o => o.Label);
         form.Heading("Kniplengte");
@@ -329,6 +352,7 @@ public partial class MainWindow
             next.ColorCode = colorCode.Text.Trim(); next.Color = PropertyColor(color.Text);
             next.CrossSectionMm2 = EditData.Number(section.Text, "Doorsnede", .000001);
             next.Signal = signal.Text.Trim(); next.CableId = PropertyForm.Value<PropertyOption>(cable).Id;
+            next.NetName = netName.Text.Trim(); next.Shielding = shielding.Text.Trim(); next.LengthNeedsConfirmation = lengthConfirmed.IsChecked != true;
             next.LengthSource = PropertyForm.Value<LengthSource>(source);
             next.ManualCutLengthMm = EditData.Number(manual.Text, "Handmatige kniplengte", next.LengthSource == LengthSource.Manual ? .001 : 0);
             next.StartAllowanceMm = EditData.Number(startAllowance.Text, "Begintoeslag", 0);
@@ -337,6 +361,7 @@ public partial class MainWindow
             next.Notes = notes.Text;
             var fromEnd = EndpointFromChoice(from, fromDescription.Text);
             var toEnd = EndpointFromChoice(to, toDescription.Text);
+            fromEnd.Notes = fromNotes.Text; toEnd.Notes = toNotes.Text;
             var endpoints = HarnessOperations.SetConductorEndpoints(_project, wire, fromEnd, toEnd);
             var before = EditData.Clone(wire);
             Execute(new CompositeCommand("Ader wijzigen", endpoints,
@@ -446,6 +471,7 @@ public partial class MainWindow
 
     private void BuildAnnotationProperties(PropertyForm form, Annotation annotation)
     {
+        BuildExtendedAnnotationProperties(form, annotation);
         var points = form.Text("Posities: één X; Y per regel (mm)", FormatPropertyPoints(annotation.Points), annotation.Points.Count > 1);
         var text = form.Text(annotation.Kind == AnnotationKind.Dimension ? "Maattekst (leeg = automatisch)" : "Tekst", annotation.Text, true);
         var color = form.Color("Kleur (#RRGGBB)", annotation.Color);
@@ -537,6 +563,7 @@ public partial class MainWindow
         result.AddRange(_project.Assembly.Connectors.OrderBy(c => c.Name).SelectMany(c => c.Cavities.Select(p =>
             new EndpointOption($"{c.Id}:{p.Id}", $"{c.Name} · pin {p.Label}", EndpointKind.Cavity, c.Id, p.Id))));
         result.AddRange(_project.Assembly.Splices.OrderBy(s => s.Name).Select(s => new EndpointOption(s.Id, s.Name, EndpointKind.Splice, s.Id)));
+        result.AddRange(_project.Assembly.ReferencePoints.OrderBy(s => s.Name).Select(s => new EndpointOption(s.Id, $"Referentie · {s.Name}", EndpointKind.ReferencePoint, s.Id)));
         return result;
     }
     private static EndpointOption CurrentEndpointOption(List<EndpointOption> options, Endpoint endpoint) =>
@@ -558,6 +585,7 @@ public partial class MainWindow
     {
         target.Name = source.Name; target.WirePartId = source.WirePartId; target.Color = source.Color; target.ColorCode = source.ColorCode;
         target.CrossSectionMm2 = source.CrossSectionMm2; target.Signal = source.Signal; target.CableId = source.CableId;
+        target.NetName = source.NetName; target.Shielding = source.Shielding; target.LengthNeedsConfirmation = source.LengthNeedsConfirmation;
         target.LengthSource = source.LengthSource; target.ManualCutLengthMm = source.ManualCutLengthMm;
         target.StartAllowanceMm = source.StartAllowanceMm; target.EndAllowanceMm = source.EndAllowanceMm; target.ProcessingAllowanceMm = source.ProcessingAllowanceMm;
         target.Notes = source.Notes;
@@ -608,12 +636,13 @@ public partial class MainWindow
     {
         AnnotationKind.Text => "Tekst", AnnotationKind.Line => "Lijn", AnnotationKind.Arc => "Boog", AnnotationKind.Leader => "Montageaanwijzing",
         AnnotationKind.Dimension => "Maatvoering", AnnotationKind.Image => "Afbeelding", AnnotationKind.WireTable => "Draadlijst",
-        AnnotationKind.PinTable => "Aansluitlijst", AnnotationKind.BomTable => "Stuklijst", AnnotationKind.RevisionTable => "Revisietabel", _ => "Annotatie"
+        AnnotationKind.PinTable => "Aansluitlijst", AnnotationKind.BomTable => "Stuklijst", AnnotationKind.RevisionTable => "Revisietabel",
+        AnnotationKind.FreeTable => "Vrije tabel", AnnotationKind.GraphicalNode => "Grafisch knooppuntsymbool", _ => "Annotatie"
     };
     private static string[] TableColumnsFor(AnnotationKind kind) => kind switch
     {
-        AnnotationKind.WireTable => ["Name", "From", "To", "PartNumber", "Color", "CrossSectionMm2", "RouteLengthMm", "AllowanceMm", "CutLengthMm", "LengthSource", "Signal", "Cable"],
-        AnnotationKind.PinTable => ["Connector", "Pin", "State", "Terminal", "Seal", "Plug", "Wires", "Connections"],
+        AnnotationKind.WireTable => ["Name", "From", "To", "PartNumber", "Color", "CrossSectionMm2", "RouteLengthMm", "AllowanceMm", "CutLengthMm", "LengthSource", "Signal", "Cable", "NetName", "Shielding", "FromNote", "ToNote"],
+        AnnotationKind.PinTable => ["Connector", "Pin", "State", "Terminal", "Seal", "Plug", "Wires", "Connections", "Function", "Notes", "Counterpart"],
         AnnotationKind.BomTable => ["PartNumber", "Description", "Kind", "Quantity", "Unit", "References"],
         AnnotationKind.RevisionTable => ["Revision", "Description", "Author", "Date"], _ => []
     };

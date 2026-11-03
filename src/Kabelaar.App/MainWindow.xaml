@@ -39,9 +39,19 @@
         <MenuItem x:Name="UndoMenu" Header="_Ongedaan maken" InputGestureText="Ctrl+Z" Click="Undo_Click"/>
         <MenuItem x:Name="RedoMenu" Header="_Opnieuw" InputGestureText="Ctrl+Y" Click="Redo_Click"/>
         <Separator/>
-        <MenuItem Header="Onderdeel dupliceren" InputGestureText="Ctrl+D" Click="Duplicate_Click"/>
+        <MenuItem Header="Selectie dupliceren…" InputGestureText="Ctrl+D" Click="Duplicate_Click"/>
+        <MenuItem Header="Parallelle aders…" Click="ParallelCopies_Click"/>
+        <MenuItem Header="Selectie als blok opslaan…" Click="SaveBlock_Click"/>
+        <MenuItem Header="Selectieblok invoegen…" Click="InsertBlock_Click"/>
+        <MenuItem Header="Plakken" InputGestureText="Ctrl+V" Click="Paste_Click"/>
+        <MenuItem Header="Plakken als onderlegger" Click="PasteReference_Click"/>
         <MenuItem Header="Verwijderen" InputGestureText="Delete" Click="Delete_Click"/>
         <MenuItem Header="90° roteren" InputGestureText="R" Click="Rotate_Click"/>
+        <MenuItem Header="Horizontaal spiegelen" Click="MirrorHorizontal_Click"/>
+        <MenuItem Header="Verticaal spiegelen" Click="MirrorVertical_Click"/>
+        <MenuItem Header="Naar voorgrond" Click="BringForward_Click"/>
+        <MenuItem Header="Naar achtergrond" Click="SendBackward_Click"/>
+        <MenuItem Header="Verbindingen voorstellen…" Click="SuggestConnections_Click"/>
         <MenuItem Header="Horizontaal uitlijnen" Click="AlignHorizontal_Click"/>
         <MenuItem Header="Verticaal uitlijnen" Click="AlignVertical_Click"/>
         <Separator/>
@@ -53,6 +63,9 @@
         <MenuItem Header="Connector plaatsen" Click="Tool_Click" Tag="Connector"/>
         <MenuItem Header="Ader / route tekenen" InputGestureText="W" Click="Tool_Click" Tag="Wire"/>
         <MenuItem Header="Splice plaatsen" Click="Tool_Click" Tag="Splice"/>
+        <MenuItem Header="Aansluitbaar referentiepunt" Click="Tool_Click" Tag="ReferencePoint"/>
+        <MenuItem Header="Grafisch knooppuntsymbool" Click="Tool_Click" Tag="GraphicalNode"/>
+        <MenuItem Header="Vrije tabel" Click="Tool_Click" Tag="FreeTable"/>
         <Separator/>
         <MenuItem Header="Tekst" Click="Tool_Click" Tag="Text"/>
         <MenuItem Header="Maatlijn" Click="Tool_Click" Tag="Dimension"/>
@@ -67,6 +80,8 @@
         <MenuItem Header="Afbeelding / PDF-onderlegger…" Click="Reference_Click"/>
       </MenuItem>
       <MenuItem Header="_Onderdelen">
+        <MenuItem Header="Bibliotheekonderdeel verwijderen…" Click="DeleteLibraryPart_Click"/>
+        <MenuItem Header="Verwijderd onderdeel herstellen…" Click="RestoreLibraryPart_Click"/>
         <MenuItem Header="Onderdeel definiëren…" Click="AddPart_Click"/>
         <MenuItem Header="Geselecteerd bibliotheekonderdeel bewerken…" Click="EditPart_Click"/>
         <MenuItem Header="STEP-model importeren…" Click="ImportStep_Click"/>
@@ -78,6 +93,8 @@
         <MenuItem Header="Kous / materiaal toevoegen…" Click="Material_Click"/>
       </MenuItem>
       <MenuItem Header="_Beeld">
+        <MenuItem Header="Werkruimte…" Click="Workspace_Click"/>
+        <MenuItem Header="Titelblok en bladzones…" Click="ExtendedTitleBlock_Click"/>
         <MenuItem Header="Blad passend" InputGestureText="Home" Click="Fit_Click"/>
         <MenuItem Header="Inzoomen" Click="ZoomIn_Click"/>
         <MenuItem Header="Uitzoomen" Click="ZoomOut_Click"/>
@@ -113,6 +130,7 @@
         <Button Content="Passend" Click="Fit_Click"/>
         <Separator Width="10"/>
         <CheckBox x:Name="SnapCheck" Content="Raster" IsChecked="True" VerticalAlignment="Center" Margin="8,0"/>
+        <CheckBox x:Name="EndpointSnapCheck" Content="Eindpunten" IsChecked="True" VerticalAlignment="Center" Margin="4,0"/>
         <TextBox x:Name="GridSizeBox" Text="5" Width="38" ToolTip="Rasterafstand in millimeters" LostFocus="GridChanged"/>
         <TextBlock Text="mm" VerticalAlignment="Center" Margin="4,0,8,0"/>
         <ComboBox x:Name="LayoutModeBox" Width="126" SelectionChanged="LayoutMode_Changed" ToolTip="Betekenis van geometrie en productiematen">
@@ -123,18 +141,18 @@
         <Button Content="Productie-export" Click="ProductionExport_Click" Style="{StaticResource PrimaryButton}"/>
       </WrapPanel>
     </Border>
-    <Grid>
+    <Grid x:Name="WorkspaceGrid">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="220" MinWidth="165"/>
-        <ColumnDefinition Width="5"/>
+        <ColumnDefinition x:Name="LibraryColumn" Width="220" MinWidth="165"/>
+        <ColumnDefinition x:Name="LeftSplitterColumn" Width="5"/>
         <ColumnDefinition Width="*" MinWidth="340"/>
-        <ColumnDefinition Width="5"/>
-        <ColumnDefinition Width="290" MinWidth="225"/>
+        <ColumnDefinition x:Name="RightSplitterColumn" Width="5"/>
+        <ColumnDefinition x:Name="PropertiesColumn" Width="290" MinWidth="225"/>
       </Grid.ColumnDefinitions>
       <Grid.RowDefinitions>
         <RowDefinition Height="*" MinHeight="160"/>
-        <RowDefinition Height="5"/>
-        <RowDefinition Height="210" MinHeight="100"/>
+        <RowDefinition x:Name="TablesSplitterRow" Height="5"/>
+        <RowDefinition x:Name="TablesRow" Height="210" MinHeight="100"/>
       </Grid.RowDefinitions>
       <Grid Grid.Column="0" Grid.RowSpan="3" Background="White">
         <Grid.RowDefinitions><RowDefinition Height="2*"/><RowDefinition Height="5"/><RowDefinition Height="3*"/></Grid.RowDefinitions>

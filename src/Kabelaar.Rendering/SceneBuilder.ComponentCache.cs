@@ -50,25 +50,25 @@ public static partial class SceneBuilder
     private readonly record struct ComponentAppearance(string ViewId, Point2 Origin, double Scale, string PlacementId,
         string EntityId, string Layer, bool Locked, Point2 Position, double Rotation, Point2 LabelOffset,
         double DisplayScale, bool ShowPins, bool ShowPinNumbers, bool ShowLabel, bool ShowPartNumber,
-        double LabelFontSize, double LineWidth);
-    private sealed record ComponentProjection(ComponentAppearance Appearance, PartVisual? Part, bool IsConnector,
+        double LabelFontSize, double LineWidth, bool MirrorX, bool MirrorY, NodeSymbol ReferenceSymbol);
+    private sealed record ComponentProjection(ComponentAppearance Appearance, PartVisual? Part, bool IsConnector, bool IsReference,
         string Name, CavityVisual[] Cavities, ScenePrimitive[] Primitives,
         ((string Entity, string? Cavity) Key, Point2 Position)[] Endpoints);
     private sealed class ComponentMemo { public ComponentProjection? Value; }
     private static readonly ConditionalWeakTable<PlacedComponent, ComponentMemo> ComponentProjectionCache = new();
 
     private static ComponentProjection ProjectComponent(PlacedComponent placed, ComponentAppearance appearance,
-        ConnectorInstance? connector, Splice? splice, PartVisual? part)
+        ConnectorInstance? connector, Splice? splice, PartVisual? part, PhysicalReferencePoint? reference = null)
     {
         var memo = ComponentProjectionCache.GetOrCreateValue(placed);
         lock (memo)
         {
-            var name = connector?.Name ?? splice?.Name ?? "";
+            var name = connector?.Name ?? splice?.Name ?? reference?.Name ?? "";
             var cavities = connector?.Cavities;
             var count = cavities?.Count ?? 0;
             var old = memo.Value;
             if (old is not null && old.Appearance == appearance && ReferenceEquals(old.Part, part) &&
-                old.IsConnector == (connector is not null) && old.Name == name && old.Cavities.Length == count)
+                old.IsConnector == (connector is not null) && old.IsReference == (reference is not null) && old.Name == name && old.Cavities.Length == count)
             {
                 var same = true;
                 for (var i = 0; same && i < count; i++)
@@ -84,6 +84,7 @@ public static partial class SceneBuilder
             var (sin, cos) = Math.SinCos(appearance.Rotation * Math.PI / 180);
             Point2 World(Point2 p)
             {
+                p = new(appearance.MirrorX ? -p.X : p.X, appearance.MirrorY ? -p.Y : p.Y);
                 p *= appearance.DisplayScale;
                 return new(p.X * cos - p.Y * sin + appearance.Position.X, p.X * sin + p.Y * cos + appearance.Position.Y);
             }
@@ -140,13 +141,26 @@ public static partial class SceneBuilder
             else
             {
                 var radius = 1.3 * scale * appearance.DisplayScale;
-                Add(new SceneEllipse(id, "splice", position, radius, radius, Ink, appearance.LineWidth * scale, Ink));
+                if (reference?.Symbol == NodeSymbol.Ground)
+                {
+                    foreach (var path in GroundPaths(id, "reference-point", ComponentPoint, 1.3, Ink, appearance.LineWidth * scale)) Add(path);
+                }
+                else
+                {
+                    Add(new SceneEllipse(id, reference is null ? "splice" : "reference-point", position, radius, radius,
+                        Ink, appearance.LineWidth * scale, reference is null ? Ink : "#FFFFFF"));
+                    if (reference is not null)
+                    {
+                        Add(new ScenePath(id, "reference-point", [position + new Point2(-radius * 1.5, 0), position + new Point2(radius * 1.5, 0)], Ink, appearance.LineWidth * scale));
+                        Add(new ScenePath(id, "reference-point", [position + new Point2(0, -radius * 1.5), position + new Point2(0, radius * 1.5)], Ink, appearance.LineWidth * scale));
+                    }
+                }
                 if (appearance.ShowLabel)
-                    Add(new SceneText(id, "splice-label", name, position + appearance.LabelOffset * scale,
+                    Add(new SceneText(id, reference is null ? "splice-label" : "reference-label", name, position + appearance.LabelOffset * scale,
                         appearance.LabelFontSize * scale, Bold: true));
                 endpoints.Add(((id, null), appearance.Position));
             }
-            return memo.Value = new(appearance, part, connector is not null, name, snapshot, primitives.ToArray(), endpoints.ToArray());
+            return memo.Value = new(appearance, part, connector is not null, reference is not null, name, snapshot, primitives.ToArray(), endpoints.ToArray());
         }
     }
 }

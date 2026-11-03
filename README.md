@@ -3,7 +3,7 @@
 Windows-desktopapp voor productietekeningen van kabelbomen. C# / .NET 10, WPF,
 SkiaSharp en een apart C++/Open CASCADE-proces voor STEP.
 
-De huidige bronversie is **0.9.3, lokale acceptatieversie**. De aanduiding 1.0 is
+De huidige bronversie is **0.9.4, lokale acceptatieversie**. De aanduiding 1.0 is
 gereserveerd voor de volledige praktijktest, inclusief installatie op een tweede
 pc en beoordeling van een echte productietekening. Er is geen publieke updatefeed.
 
@@ -97,6 +97,53 @@ automatisch passend maken en controleer de maatlijn vóór gebruik op ware groot
 
 ## Bediening
 
+Vanaf 0.9.4 zijn de volgende bewerkingen beschikbaar:
+
+- **Draadlabels:** selecteer een ader en kies automatisch, eigen tekst of verborgen.
+  Een expliciet lege tekst verbergt het label. Versleep het labelhandvat zonder
+  draadnummer, signaal of productiematen te wijzigen. Oversteekboogjes zijn per
+  ader instelbaar; tekenvolgorde bepaalt de bovenliggende ader.
+- **Bewerken → Dupliceren / Parallelle aders:** bekijk eerst de nieuwe aders,
+  onderdelen en aansluitingen. Externe aansluitingen van een kopie worden open
+  uiteinden; interne koppelingen worden naar de nieuwe onderdelen overgezet.
+  Onvolledige kabel- en twistgroepen worden expliciet in het voorstel vermeld.
+- **Selectieblokken:** sla een selectie op als `.kabelaarblock`. Het bestand bevat
+  de benodigde onderdelen en assets. Invoegen maakt zelfstandige bewerkbare
+  objecten. Een extra detailaanzicht blijft een afzonderlijke actie zonder extra materiaal.
+- **Contextmenu en transformeren:** rechtsklik voor acties op de selectie.
+  Roteren, spiegelen en voor-/achtergrond gebruiken dezelfde commando's als het menu.
+  Gekoppelde uiteinden en lengtevergrendelingen worden vooraf gecontroleerd.
+- **Snapping:** de schakelaar Eindpunten werkt onafhankelijk van het raster.
+  Ook vrije draaduiteinden, leaderpunten en tabelhoeken zijn snapdoelen.
+  Snapping op zich maakt geen elektrische verbinding.
+- **Leaders en tabellen:** versleep afzonderlijke leaderpunten en connectorlabels.
+  Vrije tabellen hebben bewerkbare cellen, rijen en kolommen; gekoppelde tabellen
+  behouden hun productiegegevens. Wijzig uitlijning, breedtes, rijhoogte en marges
+  via Eigenschappen; versleep de buitenhoek of een kolomgrens op het blad.
+- **Plakken:** Ctrl+V op het blad plaatst tekst of een ingesloten afbeelding.
+  In tekstvelden blijft Ctrl+V normaal werken. Plakken als onderlegger maakt een
+  afzonderlijke, niet-afdrukbare referentie. Het klembord wordt alleen gelezen bij plakken.
+- **Titelblok en zones:** Beeld → Titelblok en bladzones schakelt de uitgebreide
+  variant expliciet in. Oude bladen behouden hun bestaande kader.
+- **Aanvullende gegevens:** pinfunctie, netnaam, afscherming, aansluitnotities en
+  tegenconnectorreferenties zijn afzonderlijk bewerkbaar. Ze veroorzaken geen
+  extra fysieke verbindingen of materiaal in de stuklijst.
+- **STEP-preview:** sleep voor vrij draaien, midden-/rechtermuis voor verschuiven,
+  muiswiel voor zoomen en Passend voor het gehele model. De previewcamera wijzigt
+  de gekozen productieprojectie niet.
+- **Bibliotheek:** Onderdelen → Verwijderen/Herstellen verwijdert uitsluitend uit
+  de eigen catalogus. Bestaande projecten houden hun ingesloten definities.
+- **Werkruimte:** Beeld → Werkruimte bewaart paneelzichtbaarheid, licht/donker,
+  interfaceschaal en standaarden voor nieuwe objecten buiten de installatie.
+- **Verbindingsvoorstellen:** kies een voorstel bij een vrij uiteinde; een einde
+  op een ader kan een nieuwe splice voorstellen. Bekijk de fysieke gevolgen vóór
+  toepassen. Splitsen markeert onbekende kniplengtes en aansluittoeslagen ter controle;
+  een oude volledige kniplengte wordt niet naar beide nieuwe aders gekopieerd.
+  Kabel-/twistgroepen en gekoppeld takmateriaal moeten eerst expliciet worden verdeeld.
+- **Massa en algemene knopen:** kies een grafisch symbool of een aansluitbaar
+  referentiepunt. Een fysieke kabelboomsplitsing blijft een splice. Ringterminals
+  en andere gemonteerde onderdelen worden afzonderlijk vastgelegd en geteld.
+
 | Handeling | Bediening |
 |---|---|
 | Pan / zoom | Middenmuis of spatie+slepen / muiswiel |
@@ -115,13 +162,14 @@ automatisch passend maken en controleer de maatlijn vóór gebruik op ware groot
 Bronbestanden of de lokale bibliotheek zijn op de ontvangende pc niet nodig.
 Onderdeelbibliotheken gebruiken `.kabelaarlib`, sjablonen `.kabelaartemplate`.
 
-Vanaf 0.9.3 gebruiken opgeslagen projecten **schema 3** voor individuele
-aderopmaak en expliciete bochthandvatten. De app opent ook schema-1- en
-schema-2-projecten, behoudt de bestaande curveweergave en de fysieke
-gegevens en tekenobjecten en vult de nieuwe stijlvelden met standaardwaarden.
-Openen wijzigt het bronbestand niet; na opslaan
-gebruikt het pakket schema 3. Kabelaar 0.9.2 en ouder weigeren dit nieuwere schema,
-zodat zij de nieuwe opmaak niet stilzwijgend verliezen.
+Vanaf 0.9.4 gebruiken opgeslagen projecten **schema 4** voor labels, vrije
+tabellen, tekenvolgorde, referentiepunten en aanvullende gegevens. De app opent
+schema 1, 2 en 3 via opeenvolgende migraties met behoud van bestaande vormen,
+aansluitingen en productiegegevens. Openen wijzigt het bronbestand niet; na
+opslaan gebruikt het pakket schema 4. Kabelaar 0.9.3 en ouder weigeren dit
+nieuwere formaat. Maak een kopie als het oorspronkelijke project ook met een
+oude appversie beschikbaar moet blijven. Onbekende nieuwere of beschadigde
+formaten worden geweigerd; herstelbestanden en bibliotheken gebruiken dezelfde controles.
 
 Opslaan gebruikt een tijdelijk bestand en een atomische vervanging met herstelbare
 vorige versie. Een lokale lock plus inhoudsvingerafdruk signaleren bekende

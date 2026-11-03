@@ -9,7 +9,7 @@ public static partial class SceneBuilder
     private readonly record struct WireAppearance(string ViewId, Point2 Origin, double Scale, string Layer,
         string? PlacementId, bool Locked, string Name, string ColorCode, string Color, double CrossSection,
         bool Twisted, bool FreeStart, bool FreeEnd, double LineWidth, bool ShowLabel, double LabelFontSize,
-        Point2 LabelPosition, Point2 LabelAnchor);
+        Point2 LabelPosition, Point2 LabelAnchor, string? LabelText, double LabelRotation, Point2 DefaultLabelAnchor);
     private sealed record WireProjection(IReadOnlyList<Point2> Source, WireAppearance Appearance,
         ScenePrimitive[] Primitives, string? LabelText);
     private static readonly ConditionalWeakTable<DrawingView, Dictionary<string, WireProjection>> WireProjectionCache = new();
@@ -55,9 +55,9 @@ public static partial class SceneBuilder
         string? label = null;
         if (appearance.ShowLabel)
         {
-            label = WireLabel(cache, id, appearance.Name, appearance.ColorCode, appearance.CrossSection);
+            label = appearance.LabelText ?? WireLabel(cache, id, appearance.Name, appearance.ColorCode, appearance.CrossSection);
             result.Add(Tag(new SceneText(id, "wire-label", label, appearance.LabelPosition,
-                appearance.LabelFontSize * appearance.Scale)));
+                appearance.LabelFontSize * appearance.Scale, RotationDegrees: appearance.LabelRotation)));
             if (appearance.LabelPosition.DistanceTo(appearance.LabelAnchor) > appearance.LabelFontSize * appearance.Scale * 2.2)
                 result.Add(Tag(new ScenePath(id, "wire-label-leader",
                     [appearance.LabelAnchor, appearance.LabelPosition + new Point2(0, .5 * appearance.Scale)],
@@ -72,6 +72,7 @@ public static partial class SceneBuilder
 
     private static string WireLabel(Dictionary<string, WireProjection> cache, string id, string name, string color, double section) =>
         cache.TryGetValue(id, out var prior) && prior.LabelText is { } label && prior.Appearance.Name == name &&
+        prior.Appearance.LabelText is null &&
         prior.Appearance.ColorCode == color && prior.Appearance.CrossSection == section
             ? label : WireLabel(name, color, section);
 

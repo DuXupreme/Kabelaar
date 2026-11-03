@@ -7,7 +7,7 @@ public static partial class HarnessOperations
         Name = name, PartId = part.Id,
         Cavities = part.Pins.Select(pin => new Cavity
         {
-            PinDefinitionId = pin.Id, Label = pin.Label, MaxWires = pin.MaxWires, State = CavityState.Unspecified
+            PinDefinitionId = pin.Id, Label = pin.Label, MaxWires = pin.MaxWires, State = CavityState.Unspecified, Function = pin.Function
         }).ToList()
     };
 
@@ -185,7 +185,8 @@ public static partial class HarnessOperations
         foreach (var (placement, target) in placements)
         {
             movedByEntity.TryAdd(placement.EntityId, placement);
-            simulatedPlacements[placement] = new() { EntityId = placement.EntityId, Position = target.Position, RotationDegrees = target.Rotation, DisplayScale = target.Scale };
+            simulatedPlacements[placement] = new() { EntityId = placement.EntityId, Position = target.Position, RotationDegrees = target.Rotation, DisplayScale = target.Scale,
+                MirrorX = placement.MirrorX, MirrorY = placement.MirrorY };
         }
         var componentsByEntity = new Dictionary<string, PlacedComponent>(StringComparer.Ordinal);
         foreach (var placement in view.Components) componentsByEntity.TryAdd(placement.EntityId, placement);
@@ -451,13 +452,16 @@ public static partial class HarnessOperations
                 () => { wire.From = beforeFrom; wire.To = beforeTo; }), .. routeCommands, .. wireCommands]);
     }
 
-    private static Endpoint Clone(Endpoint endpoint) => new() { Kind = endpoint.Kind, EntityId = endpoint.EntityId, CavityId = endpoint.CavityId, Description = endpoint.Description };
+    private static Endpoint Clone(Endpoint endpoint) => new() { Kind = endpoint.Kind, EntityId = endpoint.EntityId, CavityId = endpoint.CavityId, Description = endpoint.Description, Notes = endpoint.Notes };
     private static void ValidateEndpoint(HarnessProject project, Endpoint endpoint)
     {
         if (!Enum.IsDefined(endpoint.Kind)) throw new InvalidOperationException("Onbekend aansluitsoort.");
         if (endpoint.Kind == EndpointKind.Cavity && !project.Assembly.Connectors.Any(c => c.Id == endpoint.EntityId && c.Cavities.Any(p => p.Id == endpoint.CavityId)) ||
-            endpoint.Kind == EndpointKind.Splice && !project.Assembly.Splices.Any(s => s.Id == endpoint.EntityId))
+            endpoint.Kind == EndpointKind.Splice && !project.Assembly.Splices.Any(s => s.Id == endpoint.EntityId) ||
+            endpoint.Kind == EndpointKind.ReferencePoint && !project.Assembly.ReferencePoints.Any(s => s.Id == endpoint.EntityId))
             throw new InvalidOperationException("Onbekende aansluiting.");
+        if (endpoint.Kind is EndpointKind.Splice or EndpointKind.ReferencePoint && endpoint.CavityId is not null)
+            throw new InvalidOperationException("Deze aansluiting heeft geen connectorpin.");
         if (endpoint.Kind == EndpointKind.Free && (endpoint.EntityId is not null || endpoint.CavityId is not null))
             throw new InvalidOperationException("Een vrij uiteinde mag geen aansluitverwijzing bewaren.");
     }

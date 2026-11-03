@@ -51,6 +51,8 @@ public partial class MainWindow
     {
         CancelGeometryEdit();
         if (_busy is not null || _saving || gesture.Selection.Count == 0) return;
+        if (gesture.Handle?.RouteId == "presentation")
+        { RunEditorAction(() => TryBeginPresentationEdit(gesture)); return; }
         var session = new GeometrySession { Gesture = gesture, State = _history.StateToken };
         try
         {
@@ -117,6 +119,7 @@ public partial class MainWindow
 
     internal void UpdateGeometryEdit(CanvasEditGesture gesture)
     {
+        if (_presentationDrag is not null) { UpdatePresentationEdit(gesture); return; }
         var session = _geometrySession;
         if (session is null) return;
         if (_history.StateToken != session.State) { CancelGeometryEdit(); Status("De tekening veranderde tijdens het slepen. Begin de bewerking opnieuw."); return; }
@@ -308,6 +311,7 @@ public partial class MainWindow
 
     internal void CommitGeometryEdit(CanvasEditGesture gesture)
     {
+        if (_presentationDrag is not null) { CommitPresentationEdit(gesture); return; }
         if (_geometrySession is null) return;
         UpdateGeometryEdit(gesture);
         var command = _geometrySession?.Command; var error = _geometrySession?.Error;
@@ -317,6 +321,7 @@ public partial class MainWindow
     }
     internal void CancelGeometryEdit()
     {
+        _presentationDrag = null;
         _geometrySession = null;
         Canvas.EndPreview();
     }
@@ -329,13 +334,13 @@ public partial class MainWindow
     {
         ScenePath path => new ScenePath(path.EntityId, path.Category, path.Points.Select(x => x + delta).ToArray(), path.Stroke, path.StrokeWidth, path.Fill, path.Closed, path.Smooth, path.Dashed)
             { ViewId = path.ViewId, PlacementId = path.PlacementId, LayerId = path.LayerId, Locked = path.Locked },
-        SceneText text => new SceneText(text.EntityId, text.Category, text.Text, text.Position + delta, text.HeightMm, text.Color, text.Bold, text.RotationDegrees, text.MaxWidthMm)
+        SceneText text => new SceneText(text.EntityId, text.Category, text.Text, text.Position + delta, text.HeightMm, text.Color, text.Bold, text.RotationDegrees, text.MaxWidthMm, text.Alignment)
             { ViewId = text.ViewId, PlacementId = text.PlacementId, LayerId = text.LayerId, Locked = text.Locked },
         SceneEllipse ellipse => new SceneEllipse(ellipse.EntityId, ellipse.Category, ellipse.Center + delta, ellipse.RadiusX, ellipse.RadiusY, ellipse.Stroke, ellipse.StrokeWidth, ellipse.Fill)
             { ViewId = ellipse.ViewId, PlacementId = ellipse.PlacementId, LayerId = ellipse.LayerId, Locked = ellipse.Locked },
         SceneArc arc => new SceneArc(arc.EntityId, arc.Category, arc.Center + delta, arc.Radius, arc.StartDegrees, arc.SweepDegrees, arc.Stroke, arc.StrokeWidth)
             { ViewId = arc.ViewId, PlacementId = arc.PlacementId, LayerId = arc.LayerId, Locked = arc.Locked },
-        SceneImage image => new SceneImage(image.EntityId, image.Category, image.Data, new(image.ImageBounds.X + delta.X, image.ImageBounds.Y + delta.Y, image.ImageBounds.Width, image.ImageBounds.Height))
+        SceneImage image => new SceneImage(image.EntityId, image.Category, image.Data, new(image.ImageBounds.X + delta.X, image.ImageBounds.Y + delta.Y, image.ImageBounds.Width, image.ImageBounds.Height), image.RotationDegrees)
             { ViewId = image.ViewId, PlacementId = image.PlacementId, LayerId = image.LayerId, Locked = image.Locked },
         _ => p
     };

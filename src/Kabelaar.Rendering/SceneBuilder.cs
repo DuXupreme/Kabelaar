@@ -70,6 +70,7 @@ public static partial class SceneBuilder
             if (!visualParts.ContainsKey(connector.PartId) && parts.TryGetValue(connector.PartId, out var part))
                 visualParts.Add(connector.PartId, VisualPart(part));
         var splices = lookups.Splices.ById;
+        var references = FirstById(project.Assembly.ReferencePoints, r => r.Id);
         var conductors = lookups.Wires.Items.ById;
         var wiresByBranch = lookups.Wires.ByBranch;
         var wireOffsets = lookups.Wires.Offsets;
@@ -85,6 +86,7 @@ public static partial class SceneBuilder
         Checkpoint("lookups-frame");
         foreach (var view in sheet.Views)
         {
+            var viewStart = primitives.Count;
             var scale = view.Scale * sheet.PrintScale;
             var style = view.Style;
             if (!double.IsFinite(scale) || scale <= 0 || !Geometry.IsFinite(view.Origin))
@@ -110,18 +112,19 @@ public static partial class SceneBuilder
             {
                 var connector = connectors.GetValueOrDefault(placed.EntityId);
                 var splice = splices.GetValueOrDefault(placed.EntityId);
-                if (connector is null && splice is null) continue;
+                var reference = references.GetValueOrDefault(placed.EntityId);
+                if (connector is null && splice is null && reference is null) continue;
                 var appearance = new ComponentAppearance(view.Id, view.Origin, scale, placed.Id, placed.EntityId,
                     placed.LayerId, Locked(placed.LayerId), placed.Position, placed.RotationDegrees, placed.LabelOffset,
                     placed.DisplayScale, placed.ShowPins, placed.ShowPinNumbers, placed.ShowLabel, placed.ShowPartNumber,
-                    placed.LabelFontSizeMm, style.ConnectorLineWidthMm);
+                    placed.LabelFontSizeMm, style.ConnectorLineWidthMm, placed.MirrorX, placed.MirrorY, reference?.Symbol ?? NodeSymbol.General);
                 var projection = ProjectComponent(placed, appearance, connector, splice,
-                    connector is null ? null : visualParts.GetValueOrDefault(connector.PartId));
+                    connector is null ? null : visualParts.GetValueOrDefault(connector.PartId), reference);
                 projectedComponents.Add(projection);
                 foreach (var endpoint in projection.Endpoints) endpointPositions.TryAdd(endpoint.Key, endpoint.Position);
             }
             Point2? EndpointPoint(Endpoint endpoint) => endpoint.Kind != EndpointKind.Free && endpoint.EntityId is { } entity
-                && endpointPositions.TryGetValue((entity, endpoint.Kind == EndpointKind.Splice ? null : endpoint.CavityId), out var point) ? point : null;
+                && endpointPositions.TryGetValue((entity, endpoint.Kind == EndpointKind.Cavity ? endpoint.CavityId : null), out var point) ? point : null;
             Checkpoint("endpoints");
             var wirePaths = new Dictionary<string, IReadOnlyList<Point2>>(conductors.Count);
             Dictionary<string, IReadOnlyList<Point2>>? baselineWirePaths = null;
@@ -199,7 +202,7 @@ public static partial class SceneBuilder
             var annotationPrimitives = view.Annotations.Where(a => Visible(a.LayerId))
                 .Select(a => (Annotation: a, Primitives: AnnotationPrimitives(project, view, a, scale).ToArray())).ToArray();
             WireLabelLayout? labels = null;
-            if (style.ShowWireLabels)
+            if (style.ShowWireLabels || view.WirePresentations.Any(p => p.ShowLabel == true))
             {
                 labels = new(new(sheet.MarginMm, sheet.MarginMm,
                     sheet.WidthMm - sheet.MarginMm * 2, sheet.HeightMm - sheet.MarginMm * 2));
@@ -211,7 +214,7 @@ public static partial class SceneBuilder
                     SceneBounds? body = null;
                     foreach (var primitive in component.Primitives)
                     {
-                        if (primitive.Category is "connector-symbol" or "splice")
+                        if (primitive.Category is "connector-symbol" or "splice" or "reference-point")
                             body = body is { } prior ? prior.Union(primitive.Bounds) : primitive.Bounds;
                         else if (primitive is SceneText) labels.Reserve(primitive.Bounds);
                     }
@@ -221,10 +224,15 @@ public static partial class SceneBuilder
                     labels.Reserve(primitive.Bounds);
             }
             var wireCache = WireProjectionCache.GetOrCreateValue(view);
+            var order = view.DrawOrder.Select((id, rank) => (id, rank)).DistinctBy(v => v.id)
+                .ToDictionary(v => v.id, v => v.rank + 1);
+            var orderedWires = order.Count == 0 ? project.Assembly.Conductors.AsEnumerable() :
+                project.Assembly.Conductors.OrderBy(w => order.GetValueOrDefault(w.Id));
+            CrossingIndex? crossingIndex = view.WirePresentations.Any(p => p.ShowCrossingBridges) ? new() : null;
             lock (wireCache)
             {
                 foreach (var stale in wireCache.Keys.Where(id => !conductors.ContainsKey(id)).ToArray()) wireCache.Remove(stale);
-                foreach (var wire in project.Assembly.Conductors)
+                foreach (var wire in orderedWires)
                 {
                     var points = wirePaths[wire.Id];
                     if (points.Count < 2) continue;
@@ -236,14 +244,31 @@ public static partial class SceneBuilder
                         points = twisted;
                     else if (baselineWirePaths?.ContainsKey(wire.Id) != true && wireOffsets.TryGetValue(wire.Id, out var offset))
                         points = Offset(points, offset);
-                    var label = labels?.Place(points, view.Origin, scale, WireLabel(wireCache, wire.Id, wire.Name, wire.ColorCode, wire.CrossSectionMm2),
-                        style.WireLabelFontSizeMm * scale) ?? (new Point2(), new Point2());
-                    var lineWidth = WireLineWidth(style, wire, wirePresentations?.GetValueOrDefault(wire.Id));
+                    var presentation = wirePresentations?.GetValueOrDefault(wire.Id);
+                    var showLabel = (presentation?.ShowLabel ?? style.ShowWireLabels) && presentation?.LabelText != "";
+                    var labelText = showLabel ? presentation?.LabelText ?? WireLabel(wireCache, wire.Id, wire.Name, wire.ColorCode, wire.CrossSectionMm2) : "";
+                    var defaultLabelAnchor = showLabel ? SheetPoint(Midpoint(points)) : new Point2();
+                    var label = showLabel ? presentation?.LabelPosition is { } labelPosition
+                        ? (SheetPoint(labelPosition), defaultLabelAnchor)
+                        : labels?.Place(points, view.Origin, scale, labelText, style.WireLabelFontSizeMm * scale) ?? (new Point2(), new Point2())
+                        : (new Point2(), new Point2());
+                    if (showLabel && presentation?.LabelPosition is not null)
+                        labels?.Reserve(SceneBounds.TextBounds(labelText, label.Item1, style.WireLabelFontSizeMm * scale,
+                            presentation.LabelRotationDegrees, null));
+                    var lineWidth = WireLineWidth(style, wire, presentation);
                     var appearance = new WireAppearance(view.Id, view.Origin, scale, layer, placement?.Id, Locked(layer),
                         wire.Name, wire.ColorCode, wire.Color, wire.CrossSectionMm2, twist is not null,
                         wire.From.Kind == EndpointKind.Free, wire.To.Kind == EndpointKind.Free,
-                        lineWidth, style.ShowWireLabels, style.WireLabelFontSizeMm, label.Item1, label.Item2);
-                    primitives.AddRange(ProjectWire(wireCache, wire.Id, points, appearance));
+                        lineWidth, showLabel, style.WireLabelFontSizeMm, label.Item1, label.Item2,
+                        presentation?.LabelText, presentation?.LabelRotationDegrees ?? 0, defaultLabelAnchor);
+                    var displayed = points;
+                    if (twist is null && crossingIndex is not null)
+                    {
+                        if (presentation?.ShowCrossingBridges == true)
+                            displayed = crossingIndex.Decorate(points, presentation.CrossingRadiusMm);
+                        crossingIndex.Add(points);
+                    }
+                    primitives.AddRange(ProjectWire(wireCache, wire.Id, displayed, appearance));
                 }
             }
             foreach (var (text, layer) in twistLabels) Add(text, layer);
@@ -259,6 +284,12 @@ public static partial class SceneBuilder
             if (sheet.Views.Count > 1)
                 Add(new SceneText(view.Id, "view-label", $"{view.Name}   {(view.Mode == LayoutMode.Free ? "VRIJE OPMAAK" : ScaleLabel(scale))}",
                     view.Origin + new Point2(0, -5), 3, Accent, true), "notes");
+            if (order.Count > 0)
+            {
+                var sorted = primitives.Skip(viewStart).OrderBy(p => order.GetValueOrDefault(p.EntityId)).ToArray();
+                primitives.RemoveRange(viewStart, primitives.Count - viewStart);
+                primitives.AddRange(sorted);
+            }
         }
         if (draft)
         {
@@ -413,6 +444,12 @@ public static partial class SceneBuilder
         void Path(Point2[] p, double width = .25) => items.Add(new ScenePath(sheet.Id, "sheet-frame", p, Ink, width) { Locked = true });
         void Text(string value, Point2 p, double height, bool bold = false) => items.Add(new SceneText(sheet.Id, "title-block", value, p, height, Ink, bold) { Locked = true });
         Path([new(m, m), new(right, m), new(right, bottom), new(m, bottom), new(m, m)], .5);
+        AddZones(sheet, items);
+        if (sheet.TitleBlock.Enabled)
+        {
+            AddExtendedTitleBlock(project, sheet, items);
+            return;
+        }
         var titleWidth = Math.Min(190, right - m); var left = right - titleWidth; var top = bottom - 29;
         Path([new(left, bottom), new(left, top), new(right, top)]);
         Path([new(left, top + 12), new(right, top + 12)]);
@@ -442,7 +479,13 @@ public static partial class SceneBuilder
             case AnnotationKind.Text:
                 var lines = annotation.Text.Replace("\r", "").Split('\n');
                 for (var i = 0; i < lines.Length; i++)
-                    yield return new SceneText(annotation.Id, "annotation-text", lines[i], a + new Point2(0, i * h * 1.35), h, annotation.Color);
+                {
+                    var position = a + Geometry.Transform(new(0, i * h * 1.35), annotation.RotationDegrees, new());
+                    var text = new SceneText(annotation.Id, "annotation-text", lines[i], position, h, annotation.Color,
+                        RotationDegrees: annotation.RotationDegrees);
+                    if (annotation.TextFrame) yield return TextFrame(annotation, text, scale);
+                    yield return text;
+                }
                 break;
             case AnnotationKind.Line:
                 yield return new ScenePath(annotation.Id, "annotation-line", points, annotation.Color, width);
@@ -450,8 +493,11 @@ public static partial class SceneBuilder
             case AnnotationKind.Leader:
                 yield return new ScenePath(annotation.Id, "leader", points, annotation.Color, width);
                 if (points.Length > 1)
-                    yield return Arrow(annotation.Id, "leader", points[0], points[1], annotation.Color, 2 * scale);
-                yield return new SceneText(annotation.Id, "leader-text", annotation.Text, points[^1] + new Point2(1, -1), h, annotation.Color);
+                    yield return Arrow(annotation.Id, "leader", points[0], points[1], annotation.Color, annotation.ArrowSizeMm * scale, width);
+                var leaderText = new SceneText(annotation.Id, "leader-text", annotation.Text, points[^1] + new Point2(scale, -scale),
+                    h, annotation.Color, RotationDegrees: annotation.RotationDegrees);
+                if (annotation.TextFrame) yield return TextFrame(annotation, leaderText, scale);
+                yield return leaderText;
                 break;
             case AnnotationKind.Arc:
                 // Three points are centre, radius/start and sweep-end, in that order.
@@ -469,7 +515,7 @@ public static partial class SceneBuilder
             case AnnotationKind.Image:
                 var asset = project.Assets.Find(asset => asset.Id == annotation.AssetId);
                 if (asset is { Data.Length: > 0 })
-                    yield return new SceneImage(annotation.Id, "image", asset.Data, new(a.X, a.Y, annotation.WidthMm * scale, annotation.HeightMm * scale));
+                    yield return new SceneImage(annotation.Id, "image", asset.Data, new(a.X, a.Y, annotation.WidthMm * scale, annotation.HeightMm * scale), annotation.RotationDegrees);
                 else
                 {
                     yield return new ScenePath(annotation.Id, "missing-image", [a, a + new Point2(annotation.WidthMm, 0), a + new Point2(annotation.WidthMm, annotation.HeightMm), a + new Point2(0, annotation.HeightMm)], "#B55435", .3, Closed: true);
@@ -480,7 +526,27 @@ public static partial class SceneBuilder
             case AnnotationKind.PinTable:
             case AnnotationKind.BomTable:
             case AnnotationKind.RevisionTable:
-                foreach (var primitive in Table(project, annotation, a, h, scale)) yield return primitive;
+            case AnnotationKind.FreeTable:
+                foreach (var primitive in Table(project, annotation, a, h, scale))
+                    yield return RotateTablePrimitive(primitive, a, annotation.RotationDegrees);
+                break;
+            case AnnotationKind.GraphicalNode:
+                var radius = annotation.WidthMm * scale / 2;
+                if (annotation.NodeSymbol == NodeSymbol.Ground)
+                {
+                    foreach (var path in GroundPaths(annotation.Id, "graphical-node",
+                        p => Geometry.Transform(p * scale, annotation.RotationDegrees, a), annotation.WidthMm / 2, annotation.Color, width)) yield return path;
+                }
+                else
+                    yield return new SceneEllipse(annotation.Id, "graphical-node", a, radius, radius, annotation.Color,
+                        width, annotation.FillColor);
+                if (!string.IsNullOrEmpty(annotation.Text))
+                {
+                    var nodeLabel = new SceneText(annotation.Id, "graphical-node-label", annotation.Text,
+                        a + new Point2(radius + scale, 0), h, annotation.Color, RotationDegrees: annotation.RotationDegrees);
+                    if (annotation.TextFrame) yield return TextFrame(annotation, nodeLabel, scale);
+                    yield return nodeLabel;
+                }
                 break;
         }
     }
@@ -525,39 +591,43 @@ public static partial class SceneBuilder
     {
         var (defaults, rows) = TableData(project, annotation.Kind, annotation.EntityId);
         var columns = annotation.Columns.Count > 0 ? annotation.Columns : defaults;
+        if (annotation.Kind == AnnotationKind.FreeTable && columns.Count == 0)
+            columns = Enumerable.Range(1, annotation.Rows.Select(r => r.Cells.Count).DefaultIfEmpty(0).Max()).Select(i => $"Kolom {i}").ToList();
         if (columns.Count == 0) yield break;
-        var width = Math.Max(30, annotation.WidthMm * scale);
+        var width = Math.Max(1, annotation.WidthMm * scale);
         var lineWidth = annotation.LineWidthMm * scale;
         var color = annotation.Color;
-        static double Weight(string key) => key switch
-        {
-            "Description" or "Connections" or "References" => 3,
-            "PartNumber" or "LengthSource" or "Terminal" or "Seal" or "Plug" => 2,
-            "Quantity" or "Unit" or "Pin" or "CrossSectionMm2" => .8,
-            _ => 1.3
-        };
-        var weights = columns.Select(Weight).ToArray();
-        var widths = weights.Select(w => width * w / weights.Sum()).ToArray();
+        var widths = TableWidths(annotation, columns).Select(w => w * scale).ToArray();
+        width = widths.Sum();
+        var padding = annotation.CellPaddingMm * scale;
         var offsets = new double[columns.Count + 1];
         for (var column = 0; column < columns.Count; column++) offsets[column + 1] = offsets[column] + widths[column];
         double totalHeight = 0;
-        for (var row = 0; row <= rows.Count; row++)
+        var count = annotation.Kind == AnnotationKind.FreeTable ? annotation.Rows.Count : rows.Count;
+        for (var row = annotation.ShowTableHeader ? -1 : 0; row < count; row++)
         {
-            var cells = columns.Select((key, column) => WrapTableText(row == 0 ? TableColumnTitle(key) : rows[row - 1].GetValueOrDefault(key, ""),
-                widths[column] - 2, fontSize)).ToArray();
-            var rowHeight = Math.Max(5, cells.Max(c => c.Count) * fontSize * 1.35 + 2);
+            var header = row < 0;
+            string Cell(string key, int column) => header
+                ? annotation.Kind == AnnotationKind.FreeTable ? key : TableColumnTitle(key)
+                : annotation.Kind == AnnotationKind.FreeTable ? annotation.Rows[row].Cells.ElementAtOrDefault(column) ?? ""
+                : rows[row].GetValueOrDefault(key, "");
+            var cells = columns.Select((key, column) => WrapTableText(Cell(key, column),
+                Math.Max(.1, widths[column] - padding * 2), fontSize)).ToArray();
+            var minimumHeight = Math.Max(fontSize * 1.35, cells.Max(c => c.Count) * fontSize * 1.35 + padding * 2);
+            var rowHeight = Math.Max(annotation.RowHeightMm > 0 ? annotation.RowHeightMm * scale : 5 * scale, minimumHeight);
             var y = origin.Y + totalHeight;
-            if (row == 0)
+            if (header)
                 yield return new ScenePath(annotation.Id, "table-header",
                     [new(origin.X, y), new(origin.X + width, y), new(origin.X + width, y + rowHeight), new(origin.X, y + rowHeight)],
-                    color, lineWidth, "#E5ECEE", true);
+                    color, lineWidth, annotation.TableHeaderColor, true);
             yield return new ScenePath(annotation.Id, "table-grid", [new(origin.X, y), new(origin.X + width, y)], color, lineWidth);
             for (var column = 0; column < columns.Count; column++)
             {
                 for (var line = 0; line < cells[column].Count; line++)
                     yield return new SceneText(annotation.Id, "table-cell", cells[column][line],
-                        new(origin.X + offsets[column] + 1, y + 1 + fontSize * (line * 1.35 + 1)),
-                        fontSize, color, row == 0, MaxWidthMm: widths[column] - 2);
+                        new(origin.X + offsets[column] + padding, y + padding + fontSize * (line * 1.35 + 1)),
+                        fontSize, color, header, MaxWidthMm: Math.Max(.1, widths[column] - padding * 2),
+                        Alignment: column < annotation.ColumnAlignments.Count ? annotation.ColumnAlignments[column] : annotation.CellAlignment);
             }
             totalHeight += rowHeight;
         }
@@ -601,18 +671,20 @@ public static partial class SceneBuilder
                 .Where(w => w.From.EntityId == connectorId || w.To.EntityId == connectorId)
                 .ToDictionary(w => w.Id, w => w.From.EntityId != connectorId);
             return rows.Where(w => associated.ContainsKey(w.Id))
-                .Select(w => associated[w.Id] ? w with { From = w.To, To = w.From } : w);
+                .Select(w => associated[w.Id] ? w with { From = w.To, To = w.From, FromNote = w.ToNote, ToNote = w.FromNote } : w);
         }
         return kind switch
         {
             AnnotationKind.WireTable => (["Name", "From", "To", "Color", "CrossSectionMm2", "CutLengthMm"],
                 WireRows().Select(w => Row(("Name", w.Name), ("From", w.From), ("To", w.To), ("PartNumber", w.PartNumber), ("Color", w.Color),
                     ("CrossSectionMm2", w.CrossSectionMm2), ("RouteLengthMm", w.RouteLengthMm), ("AllowanceMm", w.AllowanceMm), ("CutLengthMm", w.CutLengthMm),
-                    ("LengthSource", w.LengthSource), ("Signal", w.Signal), ("Cable", w.Cable))).ToArray()),
+                    ("LengthSource", w.LengthSource), ("Signal", w.Signal), ("Cable", w.Cable),
+                    ("NetName", w.NetName), ("Shielding", w.Shielding), ("FromNote", w.FromNote), ("ToNote", w.ToNote))).ToArray()),
             AnnotationKind.PinTable => (["Connector", "Pin", "Wires", "Connections", "Terminal", "Seal"],
                 HarnessReports.Pins(project).Where(p => connectorId is null || p.ConnectorId == connectorId)
                     .Select(p => Row(("Connector", p.Connector), ("Pin", p.Pin), ("State", p.State), ("Terminal", p.Terminal),
-                    ("Seal", p.Seal), ("Plug", p.Plug), ("Wires", p.Wires), ("Connections", p.Connections))).ToArray()),
+                    ("Seal", p.Seal), ("Plug", p.Plug), ("Wires", p.Wires), ("Connections", p.Connections),
+                    ("Function", p.Function), ("Notes", p.Notes), ("Counterpart", p.Counterpart))).ToArray()),
             AnnotationKind.BomTable => (["PartNumber", "Description", "Quantity", "Unit"],
                 HarnessReports.Bom(project).Select(b => Row(("PartNumber", b.PartNumber), ("Description", b.Description), ("Kind", b.Kind),
                     ("Quantity", b.Quantity), ("Unit", b.Unit), ("References", b.References))).ToArray()),
@@ -630,6 +702,8 @@ public static partial class SceneBuilder
         "LengthSource" => "Lengtebron", "Signal" => "Signaal", "Cable" => "Kabel", "Pin" => "Pin", "State" => "Status", "Terminal" => "Terminal",
         "Seal" => "Afdichting", "Plug" => "Plug", "Wires" => "Draden", "Connections" => "Aansluitingen", "Description" => "Omschrijving",
         "Kind" => "Type", "Quantity" => "Aantal", "Unit" => "Eenheid", "References" => "Referenties", "Revision" => "Revisie",
-        "Author" => "Auteur", "Date" => "Datum", _ => key
+        "Author" => "Auteur", "Date" => "Datum", "NetName" => "Netnaam", "Shielding" => "Afscherming",
+        "FromNote" => "Aansluitnotitie van", "ToNote" => "Aansluitnotitie naar", "Function" => "Pinfunctie",
+        "Notes" => "Notities", "Counterpart" => "Tegenonderdeel", _ => key
     };
 }

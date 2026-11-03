@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using Kabelaar.Core;
@@ -32,7 +33,7 @@ internal sealed class PartEditorWindow : Window
         MinWidth = Math.Min(900, Width); MinHeight = Math.Min(650, Height);
         WindowStartupLocation = WindowStartupLocation.CenterOwner; Background = Brushes.White;
         _part = EditData.Clone(part); Result = _part;
-        _pins = new(_part.Pins.Select(p => new PinEditRow { Id = p.Id, Label = p.Label, X = p.Position.X, Y = p.Position.Y, MaxWires = p.MaxWires }));
+        _pins = new(_part.Pins.Select(p => new PinEditRow { Id = p.Id, Label = p.Label, Function = p.Function, X = p.Position.X, Y = p.Position.Y, MaxWires = p.MaxWires }));
         var dock = new DockPanel { Margin = new(18) };
         var buttons = new StackPanel { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Right };
         var cancel = new Button { Content = "Annuleren", IsCancel = true };
@@ -97,7 +98,7 @@ internal sealed class PartEditorWindow : Window
         Grid.SetRow(preview, 1); right.Children.Add(preview);
         _pinGrid = new DataGrid { ItemsSource = _pins, AutoGenerateColumns = false, IsReadOnly = false, CanUserAddRows = true,
             CanUserDeleteRows = true, Margin = new(0, 8, 0, 0), SelectionMode = DataGridSelectionMode.Single };
-        foreach (var (header, property) in new[] { ("Pin", "Label"), ("X mm", "X"), ("Y mm", "Y"), ("Max. aders", "MaxWires") })
+        foreach (var (header, property) in new[] { ("Pin", "Label"), ("Functie", "Function"), ("X mm", "X"), ("Y mm", "Y"), ("Max. aders", "MaxWires") })
             _pinGrid.Columns.Add(new DataGridTextColumn { Header = header, Binding = new System.Windows.Data.Binding(property), Width = new DataGridLength(1, DataGridLengthUnitType.Star) });
         _pinGrid.CellEditEnding += (_, _) => Dispatcher.BeginInvoke(() => _drawing.InvalidateVisual());
         _pinGrid.SelectionChanged += (_, _) => _drawing.InvalidateVisual();
@@ -155,7 +156,7 @@ internal sealed class PartEditorWindow : Window
             _part.MaxCrossSectionMm2 = string.IsNullOrWhiteSpace(_max.Text) ? null : EditData.Number(_max.Text, "Maximum", 0);
             if (_part.MinCrossSectionMm2 > _part.MaxCrossSectionMm2) throw new ArgumentException("Minimumdoorsnede is groter dan maximumdoorsnede.");
             _part.RequiresTerminal = _terminal.IsChecked == true; _part.RequiresSeal = _seal.IsChecked == true;
-            _part.Pins = _pins.Select(p => new PinDefinition { Id = p.Id, Label = p.Label, Position = new(p.X, p.Y), MaxWires = p.MaxWires }).ToList();
+            _part.Pins = _pins.Select(p => new PinDefinition { Id = p.Id, Label = p.Label, Function = p.Function, Position = new(p.X, p.Y), MaxWires = p.MaxWires }).ToList();
             Result = _part; DialogResult = true;
         }
         catch (Exception ex) { MessageBox.Show(this, ex.Message, "Controleer onderdeelgegevens"); }
@@ -197,28 +198,60 @@ internal sealed class PartEditorWindow : Window
     private static FrameworkElement MeshPreview(CadMesh mesh)
     {
         var grid = new DockPanel { Margin = new(8, 0, 0, 0) };
-        var rotation = new Slider { Minimum = -180, Maximum = 180, Value = 35, Margin = new(5) };
-        DockPanel.SetDock(rotation, Dock.Bottom); grid.Children.Add(rotation);
+        var tools = new StackPanel();
+        tools.Children.Add(new TextBlock { Text = "3D-preview · los van de productieprojectie", TextWrapping = TextWrapping.Wrap, FontWeight = FontWeights.SemiBold });
+        tools.Children.Add(new TextBlock { Text = "Links slepen: draaien · midden/rechts slepen: verschuiven · wiel: zoomen", TextWrapping = TextWrapping.Wrap, Foreground = Brushes.SlateGray, Margin = new(0, 4, 0, 4) });
+        var fit = new Button { Content = "Passend weergeven", ToolTip = "Home" }; tools.Children.Add(fit);
+        DockPanel.SetDock(tools, Dock.Bottom); grid.Children.Add(tools);
         var viewport = new Viewport3D { ClipToBounds = true };
         var geometry = new MeshGeometry3D();
         foreach (var p in mesh.Vertices) geometry.Positions.Add(new(p.X, p.Y, p.Z));
         foreach (var t in mesh.Triangles) foreach (var i in t) geometry.TriangleIndices.Add(i);
-        var bounds = geometry.Bounds; var center = new Point3D(bounds.X + bounds.SizeX / 2, bounds.Y + bounds.SizeY / 2, bounds.Z + bounds.SizeZ / 2);
-        var size = Math.Max(1, Math.Max(bounds.SizeX, Math.Max(bounds.SizeY, bounds.SizeZ)));
         var model = new GeometryModel3D(geometry, new DiffuseMaterial(new SolidColorBrush(Color.FromRgb(65, 130, 145)))) { BackMaterial = new DiffuseMaterial(Brushes.LightSlateGray) };
-        var axis = new AxisAngleRotation3D(new Vector3D(0, 0, 1), 35);
-        model.Transform = new RotateTransform3D(axis, center);
-        rotation.ValueChanged += (_, e) => axis.Angle = e.NewValue;
         var group = new Model3DGroup(); group.Children.Add(new AmbientLight(Color.FromRgb(110, 110, 110)));
         group.Children.Add(new DirectionalLight(Colors.White, new Vector3D(-1, 2, -3))); group.Children.Add(model);
         viewport.Children.Add(new ModelVisual3D { Content = group });
-        viewport.Camera = new PerspectiveCamera(center + new Vector3D(size * 1.8, -size * 2.4, size * 1.6), new Vector3D(-size * 1.8, size * 2.4, -size * 1.6), new Vector3D(0, 0, 1), 40);
-        grid.Children.Add(viewport); return grid;
+        var camera = new CadPreviewCamera(mesh.Vertices);
+        var interaction = new Border { Child = viewport, Background = Brushes.Transparent, Focusable = true, ClipToBounds = true };
+        void Update()
+        {
+            var pose = camera.Pose;
+            viewport.Camera = new PerspectiveCamera(new(pose.Position.X, pose.Position.Y, pose.Position.Z),
+                new(pose.Target.X - pose.Position.X, pose.Target.Y - pose.Position.Y, pose.Target.Z - pose.Position.Z),
+                new(pose.Up.X, pose.Up.Y, pose.Up.Z), CadPreviewCamera.FieldOfViewDegrees)
+            { NearPlaneDistance = pose.NearPlane, FarPlaneDistance = pose.FarPlane };
+        }
+        void Fit()
+        { camera.Fit(Math.Max(1, interaction.ActualWidth) / Math.Max(1, interaction.ActualHeight)); Update(); }
+        fit.Click += (_, _) => Fit();
+        interaction.Loaded += (_, _) => Fit();
+        Point? previous = null; MouseButton? button = null;
+        interaction.MouseDown += (_, e) =>
+        {
+            if (e.ChangedButton is not (MouseButton.Left or MouseButton.Middle or MouseButton.Right)) return;
+            interaction.Focus(); previous = e.GetPosition(interaction); button = e.ChangedButton;
+            interaction.CaptureMouse(); e.Handled = true;
+        };
+        interaction.MouseMove += (_, e) =>
+        {
+            if (previous is not { } start || button is null || !interaction.IsMouseCaptured) return;
+            var current = e.GetPosition(interaction); var delta = current - start; previous = current;
+            if (button == MouseButton.Left) camera.Orbit(-delta.X * .45, delta.Y * .45);
+            else camera.Pan(delta.X, delta.Y, Math.Max(1, interaction.ActualWidth));
+            Update(); e.Handled = true;
+        };
+        interaction.MouseUp += (_, e) =>
+        { if (e.ChangedButton != button) return; previous = null; button = null; interaction.ReleaseMouseCapture(); e.Handled = true; };
+        interaction.LostMouseCapture += (_, _) => { previous = null; button = null; };
+        interaction.MouseWheel += (_, e) => { camera.Zoom(e.Delta / 120d); Update(); e.Handled = true; };
+        interaction.KeyDown += (_, e) => { if (e.Key == Key.Home) { Fit(); e.Handled = true; } };
+        Update(); grid.Children.Add(interaction); return grid;
     }
     public sealed class PinEditRow
     {
         public string Id { get; set; } = Ids.New();
         public string Label { get; set; } = "";
+        public string Function { get; set; } = "";
         public double X { get; set; }
         public double Y { get; set; }
         public int MaxWires { get; set; } = 1;

@@ -9,10 +9,10 @@ using SkiaSharp.Views.WPF;
 
 namespace Kabelaar.App;
 
-public enum EditorTool { Select, Connector, Wire, Splice, Text, Dimension, Leader, Line, Arc, Image, WireTable, PinTable, BomTable, RevisionTable }
+public enum EditorTool { Select, Connector, Wire, Splice, Text, Dimension, Leader, Line, Arc, Image, WireTable, PinTable, BomTable, RevisionTable, FreeTable, GraphicalNode, ReferencePoint }
 public sealed record CanvasClick(Point2 SheetPoint, int Clicks, ModifierKeys Modifiers);
 public sealed record CanvasDrag(Point2 Start, Point2 End, IReadOnlySet<string> Selection);
-public enum GeometryHandleKind { Knot, Incoming, Outgoing }
+public enum GeometryHandleKind { Knot, Incoming, Outgoing, Label, AnnotationPoint, TableCorner, TableColumn }
 public sealed record CanvasGeometryHandle(string? WireId, string RouteId, string KnotId, GeometryHandleKind Kind, Point2 Position, Point2 Origin);
 public sealed record CanvasEditGesture(Point2 Start, Point2 Current, IReadOnlySet<string> Selection, CanvasGeometryHandle? Handle = null);
 
@@ -63,6 +63,7 @@ public sealed class HarnessCanvas : SKElement
     public event Action<int, Point2>? VertexDragCompleted;
     public event Action<Point2>? PointerMoved;
     public event Action? FinishDrawing;
+    public event Action<Point2>? ContextRequested;
 
     public HarnessCanvas()
     {
@@ -157,6 +158,8 @@ public sealed class HarnessCanvas : SKElement
         if (e.ChangedButton == MouseButton.Right)
         {
             if (Tool != EditorTool.Select) FinishDrawing?.Invoke();
+            else ContextRequested?.Invoke(ToSheet(p));
+            e.Handled = true;
             return;
         }
         if (e.ChangedButton != MouseButton.Left) return;

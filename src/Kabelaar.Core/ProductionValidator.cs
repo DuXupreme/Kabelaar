@@ -14,7 +14,7 @@ public static class StructuralValidator
         .Where(i => i.IsStructural).Select(i => $"{i.Code}: {i.Message}").ToArray();
 }
 
-public static class ProductionValidator
+public static partial class ProductionValidator
 {
     private sealed record ShapeProperty(Func<object, object?> Get, bool Required);
     private sealed record ShapeType(Func<object, object?>? Id, ShapeProperty[] Properties);
@@ -37,6 +37,7 @@ public static class ProductionValidator
         var cables = assembly.Cables.GroupBy(c => c.Id).ToDictionary(g => g.Key, g => g.First());
         var wireIds = assembly.Conductors.Select(w => w.Id).ToHashSet();
         var spliceIds = assembly.Splices.Select(s => s.Id).ToHashSet();
+        var referenceIds = assembly.ReferencePoints.Select(s => s.Id).ToHashSet();
         var assetIds = project.Assets.Select(a => a.Id).ToHashSet();
         var usedParts = new HashSet<string>();
 
@@ -76,6 +77,10 @@ public static class ProductionValidator
                 case EndpointKind.Splice:
                     if (end.EntityId is null || !spliceIds.Contains(end.EntityId)) Error("endpoint.splice", wire.Id, "Draad verwijst naar een onbekende splice.", true);
                     if (end.CavityId is not null) Error("endpoint.spliceCavity", wire.Id, "Een splice-uiteinde heeft een ongeldige pinverwijzing.", true);
+                    break;
+                case EndpointKind.ReferencePoint:
+                    if (end.EntityId is null || !referenceIds.Contains(end.EntityId)) Error("endpoint.referencePoint", wire.Id, "Draad verwijst naar een onbekend referentiepunt.", true);
+                    if (end.CavityId is not null) Error("endpoint.referenceCavity", wire.Id, "Een referentiepunt heeft geen connectorpin.", true);
                     break;
                 case EndpointKind.Cavity:
                     if (end.EntityId is null || !connectors.TryGetValue(end.EntityId, out var connector) ||
@@ -225,7 +230,7 @@ public static class ProductionValidator
                         Error("placement.style", placement.Id, "Symboolschaal en letterhoogte moeten groter dan 0 en maximaal 1000 zijn.", true);
                     if (view.Mode == LayoutMode.Scaled && Math.Abs(placement.DisplayScale - 1) > 1e-9)
                         Error("placement.scaledSymbol", placement.Id, "Een aanzicht op schaal vereist werkelijke onderdeelgeometrie met symboolschaal 1.", true);
-                    if (!connectors.ContainsKey(placement.EntityId) && !spliceIds.Contains(placement.EntityId))
+                    if (!connectors.ContainsKey(placement.EntityId) && !spliceIds.Contains(placement.EntityId) && !referenceIds.Contains(placement.EntityId))
                         Error("placement.entity", placement.Id, "Aanzicht verwijst naar een onbekend onderdeel.", true);
                     if (!layerIds.Contains(placement.LayerId)) Error("placement.layer", placement.Id, "Onderdeel staat op een onbekende laag.", true);
                 }
@@ -249,7 +254,7 @@ public static class ProductionValidator
                             foreach (var cavity in connector.Cavities)
                                 if (pins.TryGetValue(cavity.PinDefinitionId, out var pin))
                                     positions[(connector.Id, cavity.Id)] = Geometry.ComponentWorld(placement, pin.Position);
-                        if (spliceIds.Contains(placement.EntityId)) positions[(placement.EntityId, null)] = placement.Position;
+                        if (spliceIds.Contains(placement.EntityId) || referenceIds.Contains(placement.EntityId)) positions[(placement.EntityId, null)] = placement.Position;
                     }
                     foreach (var wire in assembly.Conductors.Where(w => w.BranchIds.Count > 0 && w.BranchIds.All(routeMap.ContainsKey)))
                     {
@@ -285,7 +290,7 @@ public static class ProductionValidator
                         Error("annotation.size", annotation.Id, "Afbeeldingsbreedte en -hoogte moeten positief zijn.", true);
                     if (!layerIds.Contains(annotation.LayerId)) Error("annotation.layer", annotation.Id, "Aantekening staat op een onbekende laag.", true);
                     if (annotation.AssetId is { } asset && !assetIds.Contains(asset)) Error("annotation.asset", annotation.Id, "Afbeelding verwijst naar een onbekende bijlage.", true);
-                    if (annotation.EntityId is { } entity && !branches.ContainsKey(entity) && !wireIds.Contains(entity) && !connectors.ContainsKey(entity) && !spliceIds.Contains(entity))
+                    if (annotation.EntityId is { } entity && !branches.ContainsKey(entity) && !wireIds.Contains(entity) && !connectors.ContainsKey(entity) && !spliceIds.Contains(entity) && !referenceIds.Contains(entity))
                         Error("annotation.entity", annotation.Id, "Aantekening verwijst naar een onbekend object.", true);
                     if (annotation.Kind is AnnotationKind.WireTable or AnnotationKind.PinTable &&
                         annotation.EntityId is { } filter && !connectors.ContainsKey(filter))
@@ -294,6 +299,7 @@ public static class ProductionValidator
                 }
             }
         }
+        ValidateExtended(project, issues);
         return issues;
 
         void ValidateCurve(RouteGeometry? geometry, IReadOnlyList<Point2>? points, string owner)
@@ -373,7 +379,7 @@ public static class ProductionValidator
                 case Conductor wire:
                     Identity(wire.Id, owner);
                     Required(wire.Name, wire.Id); Required(wire.Color, wire.Id); Required(wire.ColorCode, wire.Id);
-                    Required(wire.Signal, wire.Id); Required(wire.Notes, wire.Id);
+                    Required(wire.Signal, wire.Id); Required(wire.Notes, wire.Id); Required(wire.NetName, wire.Id); Required(wire.Shielding, wire.Id);
                     Walk(wire.From, wire.Id, depth + 1); Walk(wire.To, wire.Id, depth + 1);
                     if (wire.BranchIds is null) Walk(null, wire.Id, depth + 1);
                     else foreach (var branchReference in wire.BranchIds) Required(branchReference, wire.Id);
@@ -382,10 +388,11 @@ public static class ProductionValidator
                     Number(wire.StartAllowanceMm, wire.Id); Number(wire.EndAllowanceMm, wire.Id); Number(wire.ProcessingAllowanceMm, wire.Id);
                     return;
                 case Endpoint endpoint:
-                    Required(endpoint.Description, owner); EnumValue(endpoint.Kind, owner);
+                    Required(endpoint.Description, owner); Required(endpoint.Notes, owner); EnumValue(endpoint.Kind, owner);
                     return;
                 case Cavity cavity:
                     Identity(cavity.Id, owner); Required(cavity.Label, cavity.Id); Required(cavity.PinDefinitionId, cavity.Id);
+                    Required(cavity.Function, cavity.Id); Required(cavity.Notes, cavity.Id);
                     EnumValue(cavity.State, cavity.Id);
                     return;
                 case ConnectorInstance connector:
@@ -424,7 +431,7 @@ public static class ProductionValidator
                         issues.Add(new(Severity.Error, "data.nonfinite", component.Id, "Een coördinaat is niet eindig.", true));
                     return;
                 case PinDefinition pin:
-                    Identity(pin.Id, owner); Required(pin.Label, pin.Id);
+                    Identity(pin.Id, owner); Required(pin.Label, pin.Id); Required(pin.Function, pin.Id);
                     if (!Geometry.IsFinite(pin.Position)) issues.Add(new(Severity.Error, "data.nonfinite", pin.Id, "Een coördinaat is niet eindig.", true));
                     return;
             }

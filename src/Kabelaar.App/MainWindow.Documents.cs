@@ -71,6 +71,7 @@ public partial class MainWindow
         (sheet.WidthMm, sheet.HeightMm) = PaperSize(PropertyForm.Value<string>(format));
         if (copy.IsChecked == true)
             foreach (var view in sheet.Views) AssignNewPlacementIds(view);
+        else foreach (var view in sheet.Views) ApplyNewViewDefaults(view);
         var beforeSheet = _sheet; var beforeView = _view;
         Execute(new DelegateCommand("Tekenblad toevoegen",
             () => { _project.Sheets.Add(sheet); _sheet = sheet; _view = sheet.Views[0]; },
@@ -112,6 +113,13 @@ public partial class MainWindow
             view.Components.RemoveAll(c => !ids.Contains(c.EntityId) && !ids.Contains(c.Id));
             view.Routes.RemoveAll(r => !ids.Contains(r.BranchId) && !ids.Contains(r.Id));
             view.Annotations.RemoveAll(a => !ids.Contains(a.Id));
+            var visibleBranches = view.Routes.Select(r => r.BranchId).ToHashSet();
+            var visibleWires = _project.Assembly.Conductors.Where(w => w.BranchIds.Any(visibleBranches.Contains)).Select(w => w.Id).ToHashSet();
+            view.WirePresentations.RemoveAll(p => !visibleWires.Contains(p.ConductorId));
+            foreach (var presentation in view.WirePresentations) presentation.Routes.RemoveAll(r => !visibleBranches.Contains(r.BranchId));
+            var drawIds = visibleWires.Concat(visibleBranches).Concat(view.Components.Select(c => c.EntityId)).Concat(view.Components.Select(c => c.Id))
+                .Concat(view.Annotations.Select(a => a.Id)).Concat(view.Routes.Select(r => r.Id)).ToHashSet();
+            view.DrawOrder.RemoveAll(id => !drawIds.Contains(id));
         }
         AssignNewPlacementIds(view);
         view.Name = name.Text.Trim(); view.Origin = new(EditData.Number(x.Text, "X"), EditData.Number(y.Text, "Y"));
@@ -310,9 +318,11 @@ public partial class MainWindow
     private static void AssignNewPlacementIds(DrawingView view)
     {
         view.Id = Ids.New();
-        foreach (var component in view.Components) component.Id = Ids.New();
-        foreach (var route in view.Routes) route.Id = Ids.New();
-        foreach (var annotation in view.Annotations) annotation.Id = Ids.New();
+        var map = new Dictionary<string, string>();
+        foreach (var component in view.Components) { var id = Ids.New(); map[component.Id] = id; component.Id = id; }
+        foreach (var route in view.Routes) { var id = Ids.New(); map[route.Id] = id; route.Id = id; }
+        foreach (var annotation in view.Annotations) { var id = Ids.New(); map[annotation.Id] = id; annotation.Id = id; }
+        view.DrawOrder = view.DrawOrder.Select(id => map.GetValueOrDefault(id, id)).ToList();
     }
     private static string RequireText(string value, string label) => !string.IsNullOrWhiteSpace(value) ? value.Trim() : throw new ArgumentException($"{label} mag niet leeg zijn.");
     private static string NextRevision(string revision) => revision.Length == 1 && revision[0] is >= 'A' and < 'Z'

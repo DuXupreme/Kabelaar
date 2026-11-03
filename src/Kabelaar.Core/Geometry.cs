@@ -71,12 +71,14 @@ public static partial class Geometry
     }
 
     public static Point2 ComponentWorld(PlacedComponent placement, Point2 local) =>
-        Transform(local * placement.DisplayScale, placement.RotationDegrees, placement.Position);
+        Transform(new Point2(placement.MirrorX ? -local.X : local.X, placement.MirrorY ? -local.Y : local.Y) * placement.DisplayScale,
+            placement.RotationDegrees, placement.Position);
 
     public static Point2? PinWorld(HarnessProject project, PlacedComponent placement, string? cavityId)
     {
         var connector = project.Assembly.Connectors.Find(c => c.Id == placement.EntityId);
-        if (connector is null) return project.Assembly.Splices.Any(s => s.Id == placement.EntityId) ? placement.Position : null;
+        if (connector is null) return project.Assembly.Splices.Any(s => s.Id == placement.EntityId) ||
+            project.Assembly.ReferencePoints.Any(s => s.Id == placement.EntityId) ? placement.Position : null;
         var cavity = connector.Cavities.Find(c => c.Id == cavityId);
         var part = project.Parts.Find(p => p.Id == connector.PartId);
         var pin = part?.Pins.Find(p => p.Id == cavity?.PinDefinitionId);

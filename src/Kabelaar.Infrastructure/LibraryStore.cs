@@ -7,6 +7,32 @@ namespace Kabelaar.Infrastructure;
 public sealed class LibraryStore
 {
     private readonly ProjectStore store = new();
+    private sealed class DeletedParts
+    {
+        public int Version { get; set; } = 1;
+        public List<string> PartIds { get; set; } = [];
+    }
+    public HashSet<string> GetDeletedPartIds(string catalogPath)
+    {
+        var path = Path.GetFullPath(catalogPath) + ".deleted.json";
+        if (!File.Exists(path)) return new(StringComparer.Ordinal);
+        var deleted = LocalStateFile.Read<DeletedParts>(path);
+        if (deleted.Version != 1 || deleted.PartIds is null || deleted.PartIds.Any(string.IsNullOrWhiteSpace) ||
+            deleted.PartIds.Count != deleted.PartIds.Distinct(StringComparer.Ordinal).Count())
+            throw new ProjectFormatException("De lijst met verwijderde onderdelen is beschadigd of heeft een onbekende versie.");
+        return deleted.PartIds.ToHashSet(StringComparer.Ordinal);
+    }
+    /// <summary>Catalog definitions and assets remain intact for restore and embedded project references.</summary>
+    public async Task SetDeletedAsync(string catalogPath, string partId, bool deleted, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(partId)) throw new ArgumentException("Een onderdeelidentiteit is verplicht.", nameof(partId));
+        var path = Path.GetFullPath(catalogPath) + ".deleted.json";
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        using var lease = ProjectLease.Acquire(path);
+        var identities = GetDeletedPartIds(catalogPath);
+        if (deleted) identities.Add(partId); else identities.Remove(partId);
+        await LocalStateFile.WriteAsync(path, new DeletedParts { PartIds = identities.Order(StringComparer.Ordinal).ToList() }, token);
+    }
     /// <summary>Adds immutable definitions to the user's catalog without replacing unrelated project libraries.</summary>
     public async Task MergeCatalogAsync(IEnumerable<PartDefinition> parts, IEnumerable<ProjectAsset> assets, string path,
         CancellationToken cancellationToken = default)

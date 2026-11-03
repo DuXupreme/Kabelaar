@@ -39,6 +39,7 @@ public partial class MainWindow
     }
     private Point2 SnapToEndpoint(Point2 sheetPoint)
     {
+        if (EndpointSnapCheck.IsChecked != true) return sheetPoint;
         EnsureEndpointSnapIndex();
         var closest = sheetPoint; var distance = 3.0;
         foreach (var pin in _endpointSnapIndex?.Query(new(sheetPoint.X - distance, sheetPoint.Y - distance, distance * 2, distance * 2))
@@ -57,6 +58,7 @@ public partial class MainWindow
         var layers = _sheet.Layers.ToDictionary(l => l.Id);
         var connectors = _project.Assembly.Connectors.ToDictionary(c => c.Id);
         var splices = _project.Assembly.Splices.Select(s => s.Id).ToHashSet();
+        splices.UnionWith(_project.Assembly.ReferencePoints.Select(r => r.Id));
         var pinsByPart = _project.Parts.ToDictionary(p => p.Id, p => p.Pins.ToDictionary(pin => pin.Id));
         foreach (var placement in _view.Components)
         {
@@ -72,6 +74,7 @@ public partial class MainWindow
             else if (splices.Contains(placement.EntityId))
                 endpoints.Add(new SceneEllipse(placement.EntityId, "snap-splice", ToSheet(placement.Position), 0, 0));
         }
+        AddExtendedSnapTargets(endpoints);
         // This index is interaction metadata, independent from visible/exported pin dots.
         // A new scene follows every model/style/placement change; pointer movement only queries it.
         _endpointSnapIndex = new SceneSpatialIndex(endpoints);
@@ -93,6 +96,8 @@ public partial class MainWindow
                 }
             else if (_project.Assembly.Splices.Any(s => s.Id == placed.EntityId) && placed.Position.DistanceTo(modelPoint) < .1)
                 return new() { Kind = EndpointKind.Splice, EntityId = placed.EntityId, Description = "" };
+            else if (_project.Assembly.ReferencePoints.Any(s => s.Id == placed.EntityId) && placed.Position.DistanceTo(modelPoint) < .1)
+                return new() { Kind = EndpointKind.ReferencePoint, EntityId = placed.EntityId, Description = "" };
         }
         return new() { Description = "Vrij uiteinde" };
     }
@@ -103,6 +108,12 @@ public partial class MainWindow
         var model = ToModel(e.SheetPoint);
         switch (Canvas.Tool)
         {
+            case EditorTool.ReferencePoint:
+                if (!CanEditLayer("main")) return;
+                var reference = new PhysicalReferencePoint { Name = NextName("REF", _project.Assembly.ReferencePoints.Select(r => r.Name)) };
+                Execute(HarnessOperations.AddReferencePoint(_project, _view, reference, model));
+                Canvas.Select(reference.Id);
+                break;
             case EditorTool.Select:
                 if (e.Clicks == 2 && SelectedRoute() is { } selected)
                 {
@@ -157,6 +168,10 @@ public partial class MainWindow
                 var annotation = _pendingImage is not null && kind == AnnotationKind.Image ? _pendingImage :
                     new Annotation { Kind = kind, Points = [model] };
                 annotation.Points = [model];
+                ApplyNewAnnotationDefaults(annotation);
+                if (kind == AnnotationKind.FreeTable)
+                { annotation.Columns = ["Kolom 1", "Kolom 2"]; annotation.Rows = [new TableRow { Cells = ["", ""] }]; }
+                if (kind == AnnotationKind.GraphicalNode) { annotation.Text = ""; annotation.WidthMm = 6; }
                 if (kind == AnnotationKind.Text)
                 {
                     var text = FormDialog.Ask(this, "Tekst plaatsen", "Tekst");
@@ -199,16 +214,20 @@ public partial class MainWindow
                 To = FindEndpoint(points[^1]), WirePartId = part?.Id, Color = part?.Color ?? "#243244",
                 CrossSectionMm2 = part?.CrossSectionMm2 ?? .5, ColorCode = ColorCode(part?.Color ?? "#243244")
             };
-            Execute(HarnessOperations.AddRoute(_project, _view, branch, wire));
+            ApplyNewWireDefaults(wire);
+            Execute(new CompositeCommand("Ader toevoegen", HarnessOperations.AddRoute(_project, _view, branch, wire),
+                HarnessOperations.SetWireLineWidth(_view, wire.Id, _workspace.WireLineWidthMm)));
             Canvas.PendingPoints.Clear(); Canvas.Select(wire.Id);
             Status(_view.Mode == LayoutMode.Free
                 ? "Ader toegevoegd in vrije opmaak. Vul de fysieke taklengte in bij Eigenschappen; productie-export is tot die tijd geblokkeerd."
                 : "Ader toegevoegd. Klik opnieuw voor de volgende ader, Esc om te selecteren.");
+            if (!App.IsBackgroundAcceptance) OfferConnectionCandidates([wire], true);
         }
         else
         {
             if (!Enum.TryParse<AnnotationKind>(Canvas.Tool.ToString(), out var kind)) return;
             var annotation = new Annotation { Kind = kind, Points = points };
+            ApplyNewAnnotationDefaults(annotation);
             if (kind == AnnotationKind.Leader)
             {
                 var text = FormDialog.Ask(this, "Aanwijzing plaatsen", "Tekst");
@@ -288,14 +307,7 @@ public partial class MainWindow
     }
     private void Rotate_Click(object sender, RoutedEventArgs e)
     {
-        var placement = _view.Components.Find(c => Canvas.Selection.Contains(c.EntityId));
-        if (placement is null) return;
-        try
-        {
-            RequireEditableComponentGeometry([placement]);
-            Execute(HarnessOperations.MoveComponent(_project, _view, placement, placement.Position, placement.RotationDegrees + 90));
-        }
-        catch (Exception ex) { MessageBox.Show(this, ex.Message, "Roteren niet toegepast"); }
+        TransformCurrentSelection(90, false, false);
     }
     private void AlignHorizontal_Click(object sender, RoutedEventArgs e) => AlignSelection(true);
     private void AlignVertical_Click(object sender, RoutedEventArgs e) => AlignSelection(false);

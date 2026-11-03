@@ -11,16 +11,18 @@ public readonly record struct Point2(double X, double Y)
 }
 public enum LayoutMode { Scaled, Free }
 public enum PartKind { Housing, Terminal, Seal, Plug, RingTerminal, Splice, Wire, Cable, Sleeve, Accessory }
-public enum EndpointKind { Cavity, Splice, Free }
+public enum EndpointKind { Cavity, Splice, Free, ReferencePoint }
 public enum CavityState { Unspecified, Occupied, Unused, Plugged }
 public enum LengthSource { RouteAndAllowances, Manual }
-public enum AnnotationKind { Text, Line, Arc, Leader, Dimension, Image, WireTable, PinTable, BomTable, RevisionTable }
+public enum AnnotationKind { Text, Line, Arc, Leader, Dimension, Image, WireTable, PinTable, BomTable, RevisionTable, FreeTable, GraphicalNode }
+public enum TableCellAlignment { Left, Center, Right }
+public enum NodeSymbol { General, Ground }
 public enum DimensionDirection { Aligned, Horizontal, Vertical }
 public enum TwistDisplayMode { Full, Markers, Parallel }
 
 public sealed class HarnessProject
 {
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Id { get; set; } = Ids.New();
     public string Title { get; set; } = "Nieuwe kabelboom";
@@ -45,6 +47,7 @@ public sealed class HarnessAssembly
     public List<TwistGroup> TwistGroups { get; set; } = [];
     public List<MaterialItem> Materials { get; set; } = [];
     public List<CableInstance> Cables { get; set; } = [];
+    public List<PhysicalReferencePoint> ReferencePoints { get; set; } = [];
 }
 public sealed class PartDefinition
 {
@@ -75,6 +78,7 @@ public sealed class PinDefinition
     public string Label { get; set; } = "1";
     public Point2 Position { get; set; }
     public int MaxWires { get; set; } = 1;
+    public string Function { get; set; } = "";
 }
 public sealed class SymbolPath
 {
@@ -96,6 +100,8 @@ public sealed class ConnectorInstance
     public string PartId { get; set; } = "";
     public bool IncludedInAssembly { get; set; } = true;
     public string Notes { get; set; } = "";
+    public string? MatingPartId { get; set; }
+    public string? MatingConnectorId { get; set; }
     public List<Cavity> Cavities { get; set; } = [];
     public List<MaterialItem> Accessories { get; set; } = [];
 }
@@ -109,6 +115,8 @@ public sealed class Cavity
     public string? SealPartId { get; set; }
     public string? PlugPartId { get; set; }
     public int MaxWires { get; set; } = 1;
+    public string Function { get; set; } = "";
+    public string Notes { get; set; } = "";
 }
 public sealed class Splice
 {
@@ -123,6 +131,16 @@ public sealed class Endpoint
     public string? EntityId { get; set; }
     public string? CavityId { get; set; }
     public string Description { get; set; } = "Vrij uiteinde";
+    public string Notes { get; set; } = "";
+}
+/// <summary>An explicitly connectable reference, not a splice or a material item.</summary>
+public sealed class PhysicalReferencePoint
+{
+    public string Id { get; set; } = Ids.New();
+    public string Name { get; set; } = "RP1";
+    public string Description { get; set; } = "";
+    public int MaxWires { get; set; }
+    public NodeSymbol Symbol { get; set; }
 }
 public sealed class Conductor
 {
@@ -135,6 +153,9 @@ public sealed class Conductor
     public string ColorCode { get; set; } = "BK";
     public double CrossSectionMm2 { get; set; } = 0.5;
     public string Signal { get; set; } = "";
+    public string NetName { get; set; } = "";
+    public string Shielding { get; set; } = "";
+    public bool LengthNeedsConfirmation { get; set; }
     public List<string> BranchIds { get; set; } = [];
     public LengthSource LengthSource { get; set; }
     public double ManualCutLengthMm { get; set; }
@@ -188,6 +209,9 @@ public sealed class Sheet
     public double MarginMm { get; set; } = 10;
     public double PrintScale { get; set; } = 1;
     public string? LogoAssetId { get; set; }
+    public TitleBlockSettings TitleBlock { get; set; } = new();
+    public int ZoneColumns { get; set; }
+    public int ZoneRows { get; set; }
     public List<DrawingView> Views { get; set; } = [new()];
     public List<DrawingLayer> Layers { get; set; } =
     [
@@ -195,6 +219,25 @@ public sealed class Sheet
         new() { Id = "notes", Name = "Maatvoering en tekst" },
         new() { Id = "reference", Name = "Onderleggers", Locked = true, Print = false }
     ];
+}
+public sealed class TitleBlockSettings
+{
+    public bool Enabled { get; set; }
+    public string DrawnBy { get; set; } = "";
+    public string CheckedBy { get; set; } = "";
+    public string ApprovedBy { get; set; } = "";
+    public string Date { get; set; } = "";
+    public string CheckedDate { get; set; } = "";
+    public string ApprovedDate { get; set; } = "";
+    public string Material { get; set; } = "";
+    public string DocumentStatus { get; set; } = "";
+    public string GeneralTolerances { get; set; } = "";
+    public List<TitleBlockField> Fields { get; set; } = [];
+}
+public sealed class TitleBlockField
+{
+    public string Name { get; set; } = "";
+    public string Value { get; set; } = "";
 }
 public sealed class DrawingLayer
 {
@@ -216,6 +259,8 @@ public sealed class DrawingView
     public List<PlacedRoute> Routes { get; set; } = [];
     public List<WirePresentation> WirePresentations { get; set; } = [];
     public List<Annotation> Annotations { get; set; } = [];
+    /// <summary>Object identities from back to front; objects absent here retain the legacy order.</summary>
+    public List<string> DrawOrder { get; set; } = [];
 }
 /// <summary>Presentation settings only; none of these values determine production lengths or twist specifications.</summary>
 public sealed class DrawingStyle
@@ -239,6 +284,8 @@ public sealed class PlacedComponent
     public string EntityId { get; set; } = "";
     public Point2 Position { get; set; }
     public double RotationDegrees { get; set; }
+    public bool MirrorX { get; set; }
+    public bool MirrorY { get; set; }
     /// <summary>Symbol and pin display scale in a free view, independent of the library's physical geometry.</summary>
     public double DisplayScale { get; set; } = 1;
     public bool ShowPins { get; set; } = true;
@@ -296,10 +343,18 @@ public sealed class WirePresentation
 {
     public string ConductorId { get; set; } = "";
     public double? LineWidthMm { get; set; }
+    public bool? ShowLabel { get; set; }
+    public string? LabelText { get; set; }
+    public Point2? LabelPosition { get; set; }
+    public double LabelRotationDegrees { get; set; }
+    public bool ShowCrossingBridges { get; set; }
+    public double CrossingRadiusMm { get; set; } = 2;
     public List<WireRouteGeometry> Routes { get; set; } = [];
     public WirePresentation Copy() => new()
     {
-        ConductorId = ConductorId, LineWidthMm = LineWidthMm,
+        ConductorId = ConductorId, LineWidthMm = LineWidthMm, ShowLabel = ShowLabel,
+        LabelText = LabelText, LabelPosition = LabelPosition, LabelRotationDegrees = LabelRotationDegrees,
+        ShowCrossingBridges = ShowCrossingBridges, CrossingRadiusMm = CrossingRadiusMm,
         Routes = Routes.Select(r => new WireRouteGeometry { BranchId = r.BranchId, Geometry = r.Geometry.Copy() }).ToList()
     };
 }
@@ -328,6 +383,23 @@ public sealed class Annotation
     public double? DimensionOverrideMm { get; set; }
     public double OffsetMm { get; set; } = 10;
     public List<string> Columns { get; set; } = [];
+    public double RotationDegrees { get; set; }
+    public double ArrowSizeMm { get; set; } = 2;
+    public bool TextFrame { get; set; }
+    public string FillColor { get; set; } = "#FFFFFF";
+    public string TableHeaderColor { get; set; } = "#E5ECEE";
+    public NodeSymbol NodeSymbol { get; set; }
+    public List<TableRow> Rows { get; set; } = [];
+    public List<double> ColumnWidthsMm { get; set; } = [];
+    public double RowHeightMm { get; set; }
+    public double CellPaddingMm { get; set; } = 1;
+    public bool ShowTableHeader { get; set; } = true;
+    public TableCellAlignment CellAlignment { get; set; }
+    public List<TableCellAlignment> ColumnAlignments { get; set; } = [];
+}
+public sealed class TableRow
+{
+    public List<string> Cells { get; set; } = [];
 }
 public sealed class RevisionEntry
 {

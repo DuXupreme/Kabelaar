@@ -18,6 +18,7 @@ public partial class MainWindow
     {
         if (!await ConfirmLeaveAsync()) return;
         var project = new HarnessProject { Parts = EditData.Clone(_project.Parts), Assets = EditData.CloneAssets(_project.Assets) };
+        foreach (var view in project.Sheets.SelectMany(s => s.Views)) ApplyNewViewDefaults(view);
         ReplaceProject(project, null, null);
     }
     private async void Demo_Click(object sender, RoutedEventArgs e)

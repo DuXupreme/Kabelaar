@@ -1,10 +1,11 @@
 namespace Kabelaar.Core;
 
 public sealed record WireRow(string Id, string Name, string From, string To, string PartNumber, string Color,
-    double CrossSectionMm2, double RouteLengthMm, double AllowanceMm, double CutLengthMm, string LengthSource, string Signal, string? Cable);
+    double CrossSectionMm2, double RouteLengthMm, double AllowanceMm, double CutLengthMm, string LengthSource, string Signal, string? Cable,
+    string NetName = "", string Shielding = "", string FromNote = "", string ToNote = "");
 public sealed record BomRow(string PartId, string PartNumber, string Description, string Kind, double Quantity, string Unit, string References);
 public sealed record PinRow(string ConnectorId, string Connector, string CavityId, string Pin, string State,
-    string Terminal, string Seal, string Plug, string Wires, string Connections);
+    string Terminal, string Seal, string Plug, string Wires, string Connections, string Function = "", string Notes = "", string Counterpart = "");
 
 public static class HarnessReports
 {
@@ -22,6 +23,7 @@ public static class HarnessReports
     {
         if (endpoint.Kind == EndpointKind.Free) return string.IsNullOrWhiteSpace(endpoint.Description) ? "Vrij uiteinde" : endpoint.Description;
         if (endpoint.Kind == EndpointKind.Splice) return project.Assembly.Splices.Find(s => s.Id == endpoint.EntityId)?.Name ?? "? splice";
+        if (endpoint.Kind == EndpointKind.ReferencePoint) return project.Assembly.ReferencePoints.Find(p => p.Id == endpoint.EntityId)?.Name ?? "? referentiepunt";
         var connector = project.Assembly.Connectors.Find(c => c.Id == endpoint.EntityId);
         var cavity = connector?.Cavities.Find(c => c.Id == endpoint.CavityId);
         return connector is null || cavity is null ? "? aansluiting" : $"{connector.Name}:{cavity.Label}";
@@ -43,7 +45,7 @@ public static class HarnessReports
                     w.ColorCode, w.CrossSectionMm2, route, allowance,
                     w.LengthSource == LengthSource.Manual ? w.ManualCutLengthMm : route + allowance,
                     w.LengthSource == LengthSource.Manual ? "Handmatig" : "Route + toeslagen", w.Signal,
-                    w.CableId is { } cableId ? cables.GetValueOrDefault(cableId) : null);
+                    w.CableId is { } cableId ? cables.GetValueOrDefault(cableId) : null, w.NetName, w.Shielding, w.From.Notes, w.To.Notes);
             }).ToArray();
     }
 
@@ -137,7 +139,10 @@ public static class HarnessReports
             var ends = endpointRows[(c.Id, pin.Id)].OrderBy(e => e.Wire.Name).ToArray();
             return new PinRow(c.Id, c.Name, pin.Id, pin.Label, pin.State.ToString(), Number(pin.TerminalPartId),
                 Number(pin.SealPartId), Number(pin.PlugPartId), string.Join(", ", ends.Select(e => e.Wire.Name)),
-                string.Join(", ", ends.Select(e => IndexedEndpointLabel(endpointLabels, e.Other))));
+                string.Join(", ", ends.Select(e => IndexedEndpointLabel(endpointLabels, e.Other))),
+                pin.Function.Length > 0 ? pin.Function : project.Parts.Find(p => p.Id == c.PartId)?.Pins.Find(p => p.Id == pin.PinDefinitionId)?.Function ?? "",
+                pin.Notes, c.MatingConnectorId is { } other ? project.Assembly.Connectors.Find(x => x.Id == other)?.Name ?? "" :
+                    c.MatingPartId is { } matingPart ? Number(matingPart) : "");
         })).ToArray();
     }
 
@@ -148,6 +153,7 @@ public static class HarnessReports
             foreach (var cavity in connector.Cavities)
                 labels[(connector.Id, cavity.Id)] = $"{connector.Name}:{cavity.Label}";
         foreach (var splice in project.Assembly.Splices) labels[(splice.Id, null)] = splice.Name;
+        foreach (var point in project.Assembly.ReferencePoints) labels[(point.Id, null)] = point.Name;
         return labels;
     }
     private static string IndexedEndpointLabel(Dictionary<(string?, string?), string> labels, Endpoint endpoint) =>
