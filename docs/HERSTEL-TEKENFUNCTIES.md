@@ -17,24 +17,32 @@ implementatiepunt is geen verklaring van praktische gebruikersacceptatie.
 - [x] Tabel gebruikt ingestelde lijnkleur en lijndikte.
 - [x] Schema 3, migratie, regressies en exports getest.
 - [x] Volledige verborgen WPF-ketentest en prestatiedrempels geslaagd.
-- [ ] Geteste commit verpakt, upgrade en portable gecontroleerd, geïnstalleerd.
+- [x] Geteste commit verpakt, upgrade en portable gecontroleerd, geïnstalleerd.
 
-Ontwikkelcontrole: 191 tests (83 Core, 43 Infrastructure, 65 Rendering) en de
-verborgen WPF-ketentest geslaagd. Bewijs onder `artifacts/restoration-093-preflight`
-en `artifacts/restoration-093-smoke-dev2`. De definitieve releasebuild herhaalt
-deze controles op de vastgelegde commit; ontwikkelbewijs vervangt dat niet.
+Afgerond op 20 oktober 2026 op commit
+`27f2e1d280c4069bf0ff9eccf6184feaedd69395`: 199 automatische tests en 70
+verborgen appcontroles geslaagd. De definitieve prestatierun haalde p95 9,9 ms
+voor pan/zoom, 74,2 ms voor gewone bewerkingen en 13,6 ms voor bochtvoorvertoning.
+De eerdere prestatieblokkade is opgelost met gerichte route- en tekenoptimalisaties.
+Ook gelijktijdig losmaken van meerdere aders bepaalt cavity-bezetting nu vanuit
+de volledige eindtoestand, met regressiecontrole op undo/redo.
 
-De eerste definitieve pakketmeting overschreed de bewerkingsgrens bij wisselende
-pc-belasting. Daarom blijven verpakking en installatie geblokkeerd tot een
-volledige releasecontrole slaagt. De volgende optimalisatie indexeert betrokken
-routes per transactie, controleert gedeelde schaalmaten in één doorgang en
-vermijdt onnodige tekenallocaties. De bijbehorende 194 regressietests slagen;
-bewijs staat onder `artifacts/restoration-093-optimized-tests`. Per bewerking
-worden nu ook opdracht-, scène-, allocatie- en GC-metingen vastgelegd.
+Opgeslagen lokaal releasebewijs:
+- `artifacts/installed-restoration-093/result.json`: upgrade 0.9.2 → 0.9.3,
+  herstel, snelkoppelingen en portable geslaagd; 483 runtimebestanden gecontroleerd.
+- `artifacts/clean-restoration-093/result.json`: schone installatie geslaagd
+  op dezelfde commit, eveneens 483 runtimebestanden gecontroleerd.
+- `artifacts/restoration-093-final3-package.log`: installer en portable verpakt.
+
+Deze bewijsbestanden zijn op 3 november 2026 opnieuw gelezen. Dit is geen nieuwe
+testrun of verklaring over de huidige installatie. Praktijkacceptatie blijft apart.
 
 ## Tweede lokale update: 0.9.4
 
-Pas starten nadat de eerste update is geïnstalleerd.
+De voorwaarde (installatie van 0.9.3) is voldaan. Op 3 november 2026 is hervatten
+opgedragen: eerst deze voortgang en de bestaande broncommits met GitHub
+synchroniseren, daarna punten 8–25 uitvoeren. Alle werkzaamheden en controles
+blijven op de achtergrond, zonder desktopovername.
 
 - [ ] 8. Vrij draadlabel.
 - [ ] 9. Parallelle kopieën met aantal/afstand en voorstel.
