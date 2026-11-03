@@ -67,7 +67,7 @@ public static partial class SceneBuilder
             foreach (var candidate in project.Assembly.Conductors.OrderBy(w => ranks.GetValueOrDefault(w.Id)))
             {
                 if (lookups.Twists.ByWire.ContainsKey(candidate.Id)) continue;
-                var route = candidate.BranchIds.Select(routePlacements.GetValueOrDefault).FirstOrDefault(r => r is not null);
+                var route = ConductorPlacement(candidate, routePlacements);
                 if (sheet.Layers.Find(l => l.Id == (route?.LayerId ?? "main")) is { Visible: false }) continue;
                 var changed = wireModelPoints.TryGetValue(candidate.Id, out var candidatePoints);
                 candidatePoints ??= ConductorPoints(project, view, candidate);
@@ -86,8 +86,7 @@ public static partial class SceneBuilder
             if (source.Count < 2) continue;
             var wire = lookups.Wires.Items.ById.GetValueOrDefault(wireId);
             if (wire is null) continue;
-            var placement = wire.BranchIds.Select(routePlacements.GetValueOrDefault)
-                .FirstOrDefault(r => r is not null);
+            var placement = ConductorPlacement(wire, routePlacements);
             var layerId = placement?.LayerId ?? "main";
             var layer = sheet.Layers.Find(l => l.Id == layerId);
             if (layer is { Visible: false }) continue;

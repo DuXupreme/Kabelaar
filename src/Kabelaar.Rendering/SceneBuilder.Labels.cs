@@ -14,6 +14,9 @@ public static partial class SceneBuilder
         // immutable, like the sources used by WireProjectionCache, and most retain
         // their identity between edits. Cache geometry, never collision decisions.
         private static readonly ConditionalWeakTable<IReadOnlyList<Point2>, RouteAnchors> AnchorCache = new();
+        // The centre is already one of the cached arclength anchors. Label dragging
+        // must not rescan every unchanged flattened route on each scene rebuild.
+        public static Point2 Centre(IReadOnlyList<Point2> path) => AnchorCache.GetValue(path, CreateAnchors).Points[0];
         private readonly Dictionary<(int X, int Y), List<SceneBounds>> cells = [];
         private readonly List<SceneBounds> large = [];
 

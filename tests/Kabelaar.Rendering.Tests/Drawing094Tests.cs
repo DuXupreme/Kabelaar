@@ -52,6 +52,26 @@ public sealed class Drawing094Tests
     }
 
     [Fact]
+    public void CachedLabelAnchorTracksInPlaceCurveChangesAndTheirRestoration()
+    {
+        var project = CrossingProject(); var sheet = project.Sheets[0]; var view = sheet.Views[0]; var wire = project.Assembly.Conductors[0];
+        var route = view.Routes[0]; route.Geometry = Geometry.WithBend(Geometry.FromLegacy(route.Points, false), 20);
+        var presentation = new WirePresentation { ConductorId = wire.Id, LabelText = "Label", LabelPosition = new(110, 10) };
+        view.WirePresentations.Add(presentation);
+        Point2 Anchor()
+        {
+            SceneBuilder.Build(project, sheet);
+            return Assert.Single(SceneBuilder.WireLabelPreview(project, sheet, view, wire, presentation).OfType<ScenePath>(),
+                p => p.Category == "wire-label-leader").Points[0];
+        }
+        var original = Anchor(); var before = route.Geometry.Knots[0].OutHandle;
+        route.Geometry.Knots[0].OutHandle += new Point2(0, 45);
+        Assert.NotEqual(original, Anchor());
+        route.Geometry.Knots[0].OutHandle = before;
+        Assert.Equal(original, Anchor());
+    }
+
+    [Fact]
     public void CrossingBridgesFollowDrawOrderWithoutChangingProductionOrEndpointJoins()
     {
         var project = CrossingProject(); var sheet = project.Sheets[0]; var view = sheet.Views[0];

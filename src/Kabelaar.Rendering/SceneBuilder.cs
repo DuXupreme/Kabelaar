@@ -43,6 +43,12 @@ public static partial class SceneBuilder
         foreach (var value in values) result.TryAdd(id(value), value);
         return result;
     }
+    private static PlacedRoute? ConductorPlacement(Conductor wire, IReadOnlyDictionary<string, PlacedRoute> routes)
+    {
+        foreach (var branchId in wire.BranchIds)
+            if (routes.TryGetValue(branchId, out var route)) return route;
+        return null;
+    }
 
     public static DrawingScene Build(HarnessProject project, Sheet sheet, bool draft = false, bool forPrint = false,
         Action<string, double>? timing = null)
@@ -59,7 +65,7 @@ public static partial class SceneBuilder
         if (!double.IsFinite(sheet.WidthMm) || !double.IsFinite(sheet.HeightMm) || sheet.WidthMm <= 0 || sheet.HeightMm <= 0 ||
             !double.IsFinite(sheet.PrintScale) || sheet.PrintScale <= 0)
             throw new ArgumentException("Bladformaat en afdrukschaal moeten eindig en positief zijn.", nameof(sheet));
-        var primitives = new List<ScenePrimitive>();
+        var primitives = new List<ScenePrimitive>(SheetIndexCache.GetOrCreateValue(sheet).PrimitiveCount);
         var layers = FirstById(sheet.Layers, l => l.Id);
         var lookups = Lookups(project);
         var parts = lookups.Parts.ById;
@@ -193,7 +199,7 @@ public static partial class SceneBuilder
                     var midpoints = twist.ConductorIds.Where(id => wirePaths.TryGetValue(id, out var p) && p.Count > 0)
                         .Select(id => Midpoint(wirePaths[id])).ToArray();
                     var centre = new Point2(midpoints.Average(p => p.X), midpoints.Average(p => p.Y));
-                    var layer = wire.BranchIds.Select(id => routePlacements.GetValueOrDefault(id)).FirstOrDefault(r => r is not null)?.LayerId ?? "main";
+                    var layer = ConductorPlacement(wire, routePlacements)?.LayerId ?? "main";
                     if (Visible(layer))
                         twistLabels.Add((new SceneText(twist.Id, "twist-label",
                             $"{twist.Name} · {twist.ConductorIds.Count} aders · spoed {Number(twist.PitchMm)} mm",
@@ -236,7 +242,7 @@ public static partial class SceneBuilder
                 {
                     var points = wirePaths[wire.Id];
                     if (points.Count < 2) continue;
-                    var placement = wire.BranchIds.Select(id => routePlacements.GetValueOrDefault(id)).FirstOrDefault(r => r is not null);
+                    var placement = ConductorPlacement(wire, routePlacements);
                     var layer = placement?.LayerId ?? "main";
                     if (!Visible(layer)) continue;
                     var twist = twistByWire.GetValueOrDefault(wire.Id);
@@ -247,7 +253,7 @@ public static partial class SceneBuilder
                     var presentation = wirePresentations?.GetValueOrDefault(wire.Id);
                     var showLabel = (presentation?.ShowLabel ?? style.ShowWireLabels) && presentation?.LabelText != "";
                     var labelText = showLabel ? presentation?.LabelText ?? WireLabel(wireCache, wire.Id, wire.Name, wire.ColorCode, wire.CrossSectionMm2) : "";
-                    var defaultLabelAnchor = showLabel ? SheetPoint(Midpoint(points)) : new Point2();
+                    var defaultLabelAnchor = showLabel ? SheetPoint(WireLabelLayout.Centre(points)) : new Point2();
                     var label = showLabel ? presentation?.LabelPosition is { } labelPosition
                         ? (SheetPoint(labelPosition), defaultLabelAnchor)
                         : labels?.Place(points, view.Origin, scale, labelText, style.WireLabelFontSizeMm * scale) ?? (new Point2(), new Point2())

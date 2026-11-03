@@ -137,7 +137,7 @@ public static partial class SceneBuilder
         }
     }
 
-    private sealed class IndexMemo { public SceneSpatialIndex? Value; }
+    private sealed class IndexMemo { public SceneSpatialIndex? Value; public int PrimitiveCount; }
     private static readonly ConditionalWeakTable<Sheet, IndexMemo> SheetIndexCache = new();
     private static DrawingScene IndexedScene(Sheet sheet, bool draft, List<ScenePrimitive> primitives)
     {
@@ -146,6 +146,7 @@ public static partial class SceneBuilder
         {
             var scene = new DrawingScene(sheet.Id, sheet.WidthMm, sheet.HeightMm, draft, primitives, memo.Value);
             memo.Value = scene.Index;
+            memo.PrimitiveCount = primitives.Count;
             return scene;
         }
     }
