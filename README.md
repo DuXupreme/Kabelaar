@@ -131,8 +131,9 @@ Vanaf 0.9.4 zijn de volgende bewerkingen beschikbaar:
 - **STEP-preview:** sleep voor vrij draaien, midden-/rechtermuis voor verschuiven,
   muiswiel voor zoomen en Passend voor het gehele model. De previewcamera wijzigt
   de gekozen productieprojectie niet.
-- **Bibliotheek:** Onderdelen → Verwijderen/Herstellen verwijdert uitsluitend uit
-  de eigen catalogus. Bestaande projecten houden hun ingesloten definities.
+- **Bibliotheek:** Onderdelen → Verwijderen verbergt een onderdeel uit de eigen
+  bibliotheek; Herstellen maakt het opnieuw beschikbaar. Bestaande projecten
+  behouden hun ingesloten definities.
 - **Werkruimte:** Beeld → Werkruimte bewaart paneelzichtbaarheid, licht/donker,
   interfaceschaal en standaarden voor nieuwe objecten buiten de installatie.
 - **Verbindingsvoorstellen:** kies een voorstel bij een vrij uiteinde; een einde

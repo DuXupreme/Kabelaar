@@ -38,8 +38,8 @@ Beide modi gebruiken dezelfde meetlussen en drempels en genereren geen muis- of
 toetsenbordinvoer. Het rapport bewaart ook canvasafmetingen en schermschaling.
 
 Voor geïnstalleerde en portable kopieën kan `--functional-smoke` naast
-`--smoke-test` alleen de 16 functionele controles tot en met heropenen van de
-ingesloten STEP uitvoeren. Dit rapporteert expliciet `performanceMeasured: false`
+`--smoke-test` de functionele controles uitvoeren, inclusief de uitbreidingen
+van 0.9.4 en heropenen van de ingesloten STEP. Dit rapporteert expliciet `performanceMeasured: false`
 en `scope: functional-only`; het is geen prestatietest. De runtimehashes moeten
 overeenkomen met de exacte release die de volledige benchmark al heeft doorstaan.
 De volledige build accepteert deze beperkte modus niet als prestatiebewijs.
@@ -50,6 +50,12 @@ endpointgedrag, segment-/bundelbewerking en bijbehorende undo/redo.
 Een extra meetlus controleert daadwerkelijke bochtvoorvertoningen op het
 100/1000-blad met dezelfde 33/100-ms-grenzen. De test kan zijn eigen WPF-inhoud
 naar een afbeelding schrijven; de desktop van de gebruiker wordt niet vastgelegd.
+
+Vanaf 0.9.4 omvat deze ketentest ook vrije draadlabels, tabel- en leaderhandvatten,
+plakken, selectiekopieën, schema 4 en verbindingsvoorstellen bij omgekeerd
+doorlopen routes. Het definitieve 0.9.4-pakket doorliep 89 functionele controles
+en 4 aanvullende prestatiecontroles. De resultaten en installatiebewijzen staan
+in `docs/HERSTEL-TEKENFUNCTIES.md`.
 
 Een optionele lokale voorbeeldcontrole accepteert `--example-project <bestand>`
 en `--example-output <nieuwe-map>` naast de smoke-argumenten. Zij schrijft alleen
@@ -79,7 +85,7 @@ De automatische suites omvatten modelregels, routevertakkingen, materiaaltelling
 opslagfouten/conflicten, beschadigde herstelbestanden, catalogusbehoud, echte
 STEP-import in mm/inch, annuleren, contouren, schaal en alle uitvoerformaten.
 
-Bij de lokale bedieningstest zijn connectorselectie, verslepen met gekoppelde
+Bij een eerdere lokale bedieningstest zijn connectorselectie, verslepen met gekoppelde
 aders, behoud van vrije productiematen en Ctrl+Z gecontroleerd. Een synthetische
 STEP-box is via de bestandsdialoog geïmporteerd; 3D-preview, 2D-projectie,
 handmatig plaatsen van een pin en annuleren zijn visueel gecontroleerd.

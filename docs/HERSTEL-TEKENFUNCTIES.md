@@ -49,7 +49,7 @@ staan op d416a9ff34592db3f541a643fbede15061d55b74 (main), rechtstreeks op GitHub
 gecontroleerd vóór de start van 0.9.4.
 
 De onderstaande functies zijn geïmplementeerd. De definitieve releasecontrole
-(inclusief prestatiemeting), verpakking en installatie blijven aparte voorwaarden.
+(inclusief prestatiemeting), verpakking en lokale installatie zijn afgerond.
 
 - [x] 8. Vrij draadlabel.
 - [x] 9. Parallelle kopieën met aantal/afstand en voorstel.
@@ -69,9 +69,52 @@ De onderstaande functies zijn geïmplementeerd. De definitieve releasecontrole
 - [x] 23. Panelen, thema, interfaceschaal en nieuwe-objectstandaarden.
 - [x] 24. Bevestigbare verbindings- en aftakkingsvoorstellen.
 - [x] 25. Grafische knopen en fysieke aansluitbare referentiepunten.
-- [ ] Schema 4, migraties, regressies en exports getest.
-- [ ] Verborgen WPF-ketentest en prestatiedrempels geslaagd.
-- [ ] Geteste commit verpakt, upgrade en portable gecontroleerd, geïnstalleerd.
+- [x] Schema 4, migraties, regressies en exports getest.
+- [x] Verborgen WPF-ketentest en prestatiedrempels geslaagd.
+- [x] Geteste commit verpakt, upgrade en portable gecontroleerd, geïnstalleerd.
+
+Afgerond op 3 november 2026. De lokale installer en portable zijn gebouwd uit
+de schone broncommit `8d197498717adfc03d14493d0e2e2adfd0ac4b13` en bevatten
+versie 0.9.4. De broncommit staat op GitHub; dit is geen publieke GitHub-release
+of online updatefeed. Deze voortgangsregistratie is een afzonderlijke
+documentatiecommit en verandert de geteste programma-identiteit niet.
+
+Definitief bewijs:
+
+- 241 automatische tests geslaagd: 108 Core, 59 Infrastructure en 74 Rendering.
+- 93 verborgen appcontroles geslaagd, waarvan 89 functioneel en 4 voor de
+  prestatieproef. De geïnstalleerde en portable kopieën doorliepen dezelfde
+  89 functionele controles op bestanden met overeenkomende controlehashes.
+- Op het vaste blad met 100 connectoren en 1.000 aders: p95 5,9 ms pan/zoom,
+  50,2 ms gewone bewerkingen en 8,4 ms bochtvoorvertoning, bij 175% schermschaling.
+  De bestaande drempels van 33/100 ms zijn ongewijzigd. Hergebruik van
+  labelgeometrie en tekenbuffers is met regressietests gecontroleerd.
+- Upgrade 0.9.3 → 0.9.4, daadwerkelijk herstarten, herstel, portable,
+  Windows-snelkoppelingen en bestandsassociatie gecontroleerd.
+- Schone installatie afzonderlijk vanuit een gewone Windows-achtergrondtaak
+  geslaagd; 483 runtimebestanden gecontroleerd. De echte installatiemap en
+  Windows-versieregistratie bevatten 0.9.4. Bestaande gebruikersgegevens behouden.
+- De J904-voorbeeldcontrole slaagde op een afzonderlijke kopie; de hash van het
+  oorspronkelijke project bleef gelijk. Bedrijfsgegevens blijven buiten GitHub.
+
+De eerste schone-installatieproef werd afgewezen wegens Windows-mapomleiding
+vanuit Codex. De geverifieerde programmamap is teruggezet en de proef is vanuit
+een gewone Windows-context herhaald. De omgeleide programmakopie is veilig als
+bewijs gearchiveerd en kan de echte installatie niet meer overschaduwen.
+
+Opgeslagen lokaal releasebewijs:
+
+- `artifacts/builds/restoration-094-final2/app/build-info.json`
+- `artifacts/builds/restoration-094-final2/smoke/acceptance-report.json`
+- `artifacts/releases/0.9.4-local/package-verification.json`
+- `artifacts/installed-restoration-094/result.json`
+- `artifacts/clean-restoration-094-ordinary/result.json`
+- `artifacts/ordinary-final-094.json`
+- `artifacts/installed-example-0.9.4/result.json`
+
+Volgende stap is praktische beoordeling volgens `docs/ACCEPTATIE.md`, inclusief
+een echte productietekening en de tweede-pc-proef. Deze menselijke beoordeling
+is nog niet afgevinkt en blijft een voorwaarde voor versie 1.0.
 
 ## Blijvende releasevoorwaarden
 
